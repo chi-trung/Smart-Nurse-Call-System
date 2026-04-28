@@ -1,6 +1,188 @@
 "# Smart Nurse Call System
 
+![IoT](https://img.shields.io/badge/Project-IoT-blue?style=flat-square)
+![C#](https://img.shields.io/badge/C%23-WinForms-green?style=flat-square)
+![Arduino](https://img.shields.io/badge/Arduino-UNO-orange?style=flat-square)
+![Node.js](https://img.shields.io/badge/Backend-Node.js-yellow?style=flat-square)
+![React](https://img.shields.io/badge/Frontend-React-cyan?style=flat-square)
+![SQLite](https://img.shields.io/badge/Database-SQLite-lightblue?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-purple?style=flat-square)
+
 IoT-based nurse call system với real-time monitoring dashboard, automatic alerts, và multi-user support. Hệ thống gồm 3 thành phần: C# GUI (y tá), Node.js Backend (API server), và React Web Dashboard (quản trị).
+
+---
+
+## 🚀 Tính năng Chính
+
+- ✅ **Cuộc gọi khẩn cấp & thường** - Phân biệt mức độ ưu tiên  
+- ✅ **Xếp hàng ưu tiên** - Khẩn cấp xử lý trước  
+- ✅ **Real-time Monitoring** - WebSocket cập nhật tức thì  
+- ✅ **Cảnh báo Audio + Vibration** - Thông báo âm thanh (3 beeps) + rung điện thoại  
+- ✅ **Database Sync** - Tự động đồng bộ SQLite giữa GUI & Web  
+- ✅ **Fallback Mode** - GUI vẫn hoạt động nếu backend down  
+- ✅ **Vietnamese UI** - Giao diện tiếng Việt hoàn toàn  
+- ✅ **Responsive Design** - Desktop, tablet & mobile  
+
+---
+
+## 🧠 System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     SMART NURSE CALL SYSTEM                     │
+└─────────────────────────────────────────────────────────────────┘
+
+HARDWARE LAYER (Phần cứng):
+  [Push Button] → [Arduino UNO]
+  (P1, P2, P3, P4)   ↓ (Serial/USB)
+                  [COM Port]
+
+GUI LAYER (Giao diện Y tá):
+  C# WinForms (Form1.cs)
+      ↓ (API Call / Direct DB)
+  
+BACKEND LAYER (Máy chủ):
+  Node.js Express API
+      ├→ SQLite Database (Source of Truth)
+      └→ WebSocket (Real-time Broadcast)
+           ↓
+  
+ADMIN LAYER (Giao diện Quản trị):
+  React Dashboard (Web Browser)
+      ↓ (WebSocket Listen)
+  [Display Alerts] → [Audio + Vibration]
+
+PERMISSION MODEL:
+  • Arduino ↔ GUI: WRITE (Update DB)
+  • GUI ↔ Backend: READ-WRITE API (Confirm completion)
+  • Backend ↔ DB: READ-WRITE (Source of truth)
+  • Backend ↔ Web: READ-ONLY (WebSocket broadcast)
+  • Web ↔ Browser: READ-ONLY Display
+```
+
+---
+
+## 🔄 System Flow (Từng bước)
+
+### Kịch bản: Bệnh nhân gọi khẩn cấp
+
+**Bước 1️⃣ - Bệnh nhân nhấn nút (P1 - Phòng 1 - Khẩn cấp)**
+```
+Patient presses button [EMERGENCY]
+           ↓
+Arduino receives signal
+           ↓
+Sends: "REQ:1:E" (Room 1, Emergency)
+           ↓ (Serial → COM port)
+```
+
+**Bước 2️⃣ - C# GUI nhận dữ liệu**
+```
+WinForms receives: "REQ:1:E"
+           ↓
+Insert into database:
+  RoomId: 1
+  CallType: Emergency
+  Status: Pending
+  RequestTime: 2026-04-28 13:24:19
+           ↓ (Send API Call)
+```
+
+**Bước 3️⃣ - Backend xử lý & broadcast**
+```
+Backend receives: POST /api/calls/complete
+           ↓
+Update database: Status = "Pending" → displayed
+           ↓ (WebSocket Event)
+Broadcast to all Web clients:
+  "emergency-alert" + "🔴 CẢNH BÁO KHẨN CẤP"
+           ↓
+```
+
+**Bước 4️⃣ - Web Dashboard hiển thị**
+```
+React receives WebSocket event
+           ↓
+Trigger Audio (3 beeps) + Vibration
+           ↓
+Display Alert Card:
+  ⚠️ CẢNH BÁO KHẨN CẤP
+  📍 Phòng 1
+  🔴 HỎA TỐC
+           ↓
+Admin sees red notification (Auto-dismiss in 8 seconds)
+           ↓
+```
+
+**Bước 5️⃣ - Y tá xử lý**
+```
+Nurse clicks "XÁC NHẬN XỰ LÝ" button
+           ↓
+WinForms sends: POST /api/calls/complete
+  { roomId: "1", callType: "Emergency" }
+           ↓ (Backend updates)
+Database: Status = "Completed"
+           ↓ (Arduino receives)
+```
+
+**Bước 6️⃣ - Arduino nhận xác nhận**
+```
+Arduino receives: "DONE:1:E"
+           ↓
+Turn OFF LED P1 (Red)
+           ↓
+Send completion buzzer (1 beep)
+           ↓
+System ready for next call
+```
+
+---
+
+## 📸 Demo & Screenshots
+
+### 1️⃣ C# WinForms GUI - Giao diện Y tá
+
+Y tá kết nối Arduino qua COM port, nhận và xử lý cuộc gọi:
+
+![C# GUI Dashboard](assets/gui.png)
+
+**Tính năng:**
+- Bảng hàng đợi hiển thị cuộc gọi chờ xử lý
+- Phân biệt khẩn cấp (hồng) vs thường (xanh)
+- Nút "XÁC NHẬN XỰ LÝ" để hoàn thành
+- Nhật ký hệ thống chi tiết
+
+---
+
+### 2️⃣ React Web Dashboard - Giao diện Quản trị
+
+Quản trị viên giám sát real-time từ web:
+
+![React Dashboard](assets/web.png)
+
+**Tính năng:**
+- 📊 Thống kê tổng hợp (tổng, khẩn cấp, hoàn thành, tỷ lệ)
+- 🔴 Cảnh báo khẩn cấp nổi bật với âm thanh
+- 📋 Danh sách cuộc gọi chưa xử lý
+- 📈 Biểu đồ phân tích theo phòng
+- ⏱️ Cập nhật real-time mỗi 4 giây
+
+---
+
+### 3️⃣ Proteus 8 Circuit Design - Sơ đồ mạch điện
+
+Thiết kế phần cứng cho hệ thống:
+
+![Proteus Circuit Diagram](assets/proteus.png)
+
+**Thành phần:**
+- Arduino Uno (CPU)
+- 4 Push buttons (P1, P2, P3, P4)
+- 8 LED chỉ báo (4 xanh + 4 đỏ)
+- Buzzer (cảnh báo âm thanh)
+- Module RS232 (COM port)
+
+---
 
 ## 📋 Yêu cầu
 
