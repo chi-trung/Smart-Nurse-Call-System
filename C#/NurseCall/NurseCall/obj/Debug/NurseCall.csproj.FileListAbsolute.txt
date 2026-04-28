@@ -1,0 +1,14 @@
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\bin\Debug\NurseCall.exe.config
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\bin\Debug\NurseCall.exe
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\bin\Debug\NurseCall.pdb
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\obj\Debug\NurseCall.csproj.AssemblyReference.cache
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\obj\Debug\NurseCall.Properties.Resources.resources
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\obj\Debug\NurseCall.csproj.GenerateResource.cache
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\obj\Debug\NurseCall.csproj.CoreCompileInputs.cache
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\obj\Debug\NurseCall.exe
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\obj\Debug\NurseCall.pdb
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\bin\Debug\System.Data.SQLite.dll
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\obj\Debug\NurseCall.csproj.Up2Date
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\bin\Debug\System.Data.SQLite.xml
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\bin\Debug\Newtonsoft.Json.dll
+C:\Users\Lenovo\Downloads\iot-project-final\C#\NurseCall\NurseCall\bin\Debug\Newtonsoft.Json.xml
