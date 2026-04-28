@@ -8,7 +8,7 @@
 ![SQLite](https://img.shields.io/badge/Database-SQLite-lightblue?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-purple?style=flat-square)
 
-IoT-based nurse call system với real-time monitoring dashboard, automatic alerts, và multi-user support. Hệ thống gồm 3 thành phần: C# GUI (y tá), Node.js Backend (API server), và React Web Dashboard (quản trị).
+IoT-based nurse call system với real-time monitoring dashboard, automatic alerts, nurse user management, và login/logout cho y tá. Hệ thống gồm 3 thành phần: C# WinForms GUI (y tá), Node.js Backend (API server), và React Web Dashboard (quản trị).
 
 ---
 
@@ -19,9 +19,13 @@ IoT-based nurse call system với real-time monitoring dashboard, automatic aler
 - ✅ **Real-time Monitoring** - WebSocket cập nhật tức thì  
 - ✅ **Cảnh báo Audio + Vibration** - Thông báo âm thanh (3 beeps) + rung điện thoại  
 - ✅ **Database Sync** - Tự động đồng bộ SQLite giữa GUI & Web  
+- ✅ **Nurse Login/Logout** - Y tá đăng nhập trước khi thao tác trên GUI  
+- ✅ **Nurse Management** - Admin tạo/xóa tài khoản y tá trên web  
+- ✅ **Nurse Performance Stats** - Thống kê theo từng y tá và lịch sử xử lý  
 - ✅ **Fallback Mode** - GUI vẫn hoạt động nếu backend down  
 - ✅ **Vietnamese UI** - Giao diện tiếng Việt hoàn toàn  
 - ✅ **Responsive Design** - Desktop, tablet & mobile  
+- ✅ **Response Time Fix** - Thời gian phản hồi dùng local time, không còn số âm  
 
 ---
 
@@ -38,12 +42,15 @@ HARDWARE LAYER (Phần cứng):
                   [COM Port]
 
 GUI LAYER (Giao diện Y tá):
+  LoginForm.cs → Form1.cs
+      ↓ (Xác thực y tá trước, sau đó xử lý call)
   C# WinForms (Form1.cs)
       ↓ (API Call / Direct DB)
   
 BACKEND LAYER (Máy chủ):
   Node.js Express API
       ├→ SQLite Database (Source of Truth)
+  ├→ Nurse user management & auth
       └→ WebSocket (Real-time Broadcast)
            ↓
   
@@ -54,9 +61,9 @@ ADMIN LAYER (Giao diện Quản trị):
 
 PERMISSION MODEL:
   • Arduino ↔ GUI: WRITE (Update DB)
-  • GUI ↔ Backend: READ-WRITE API (Confirm completion)
+  • GUI ↔ Backend: READ-WRITE API (Login, confirm completion, save nurseName)
   • Backend ↔ DB: READ-WRITE (Source of truth)
-  • Backend ↔ Web: READ-ONLY (WebSocket broadcast)
+  • Backend ↔ Web: READ-ONLY + admin nurse management API
   • Web ↔ Browser: READ-ONLY Display
 ```
 
@@ -88,18 +95,31 @@ Insert into database:
            ↓ (Send API Call)
 ```
 
-**Bước 3️⃣ - Backend xử lý & broadcast**
+**Bước 3️⃣ - Y tá đăng nhập và xác nhận xử lý**
 ```
-Backend receives: POST /api/calls/complete
+LoginForm xuất hiện trước Form1
            ↓
-Update database: Status = "Pending" → displayed
+Y tá đăng nhập bằng tài khoản do admin tạo
+           ↓
+Form1 hiển thị tên y tá đang login và nút Đăng xuất
+           ↓
+Khi xử lý xong call, GUI gửi nurseName lên backend
+```
+
+**Bước 4️⃣ - Backend xử lý & broadcast**
+```
+Backend receives: POST /api/calls/complete-with-nurse
+           ↓
+Update database: Status = "Completed"
+Save ResponseTime = local time
+Save NurseName / CompletedBy
            ↓ (WebSocket Event)
 Broadcast to all Web clients:
   "emergency-alert" + "🔴 CẢNH BÁO KHẨN CẤP"
            ↓
 ```
 
-**Bước 4️⃣ - Web Dashboard hiển thị**
+**Bước 5️⃣ - Web Dashboard hiển thị**
 ```
 React receives WebSocket event
            ↓
@@ -114,18 +134,19 @@ Admin sees red notification (Auto-dismiss in 8 seconds)
            ↓
 ```
 
-**Bước 5️⃣ - Y tá xử lý**
+**Bước 6️⃣ - Y tá xử lý**
 ```
 Nurse clicks "XÁC NHẬN XỰ LÝ" button
            ↓
-WinForms sends: POST /api/calls/complete
-  { roomId: "1", callType: "Emergency" }
+WinForms sends: POST /api/calls/complete-with-nurse
+  { roomId: "1", callType: "Emergency", nurseName: "...", nurseId: 1 }
            ↓ (Backend updates)
 Database: Status = "Completed"
+NurseStats / lịch sử xử lý được cập nhật
            ↓ (Arduino receives)
 ```
 
-**Bước 6️⃣ - Arduino nhận xác nhận**
+**Bước 7️⃣ - Arduino nhận xác nhận**
 ```
 Arduino receives: "DONE:1:E"
            ↓
@@ -240,12 +261,22 @@ Mở browser và đăng nhập:
 - **Tên**: admin
 - **Mật khẩu**: admin123
 
+Nếu cần tạo sẵn tài khoản demo, gọi:
+```bash
+curl -X POST http://localhost:5000/api/init
+```
+
+Tài khoản demo được tạo sẵn:
+- **Admin**: admin / admin123
+- **Nurse**: nurse1 / nurse123
+
 ### 4. Kết nối C# GUI (tùy chọn)
 
 Nếu có C# WinForms app:
 - Đảm bảo Backend đang chạy (`http://localhost:5000`)
 - Database path trong C# project phải trỏ đến cùng file SQLite
 - Cổng COM phải đúng với Arduino device
+- Khi mở app, LoginForm sẽ hiện trước Form1
 
 ## ⚙️ Cấu hình
 
@@ -315,11 +346,13 @@ JWT_SECRET=generate-strong-random-key-here
 
 ### 1. C# WinForms GUI - Giao diện Y tá
 Giao diện cho y tá xác nhận xử lý cuộc gọi từ bệnh nhân:
+- LoginForm bắt buộc trước khi vào Form1
 - Kết nối COM port với Arduino
 - Bảng hàng đợi hiển thị cuộc gọi chờ xử lý
 - Phân biệt cuộc gọi khẩn cấp (hồng) và thường (xanh)
 - Nút "XÁC NHẬN XỰ LÝ" để hoàn thành
 - Nhật ký hệ thống theo dõi tất cả thao tác
+- Hiển thị tên y tá đang đăng nhập và nút Đăng xuất
 
 ![C# GUI Dashboard](assets/gui.png)
 
@@ -329,6 +362,8 @@ Bảng điều khiển web cho quản trị viên giám sát real-time:
 - Cảnh báo khẩn cấp nổi bật (màu đỏ) với thông báo âm thanh
 - Danh sách cuộc gọi chưa xử lý
 - Biểu đồ phân tích theo phòng và loại cuộc gọi
+- Tab quản lý y tá: tạo/xóa user nurse
+- Tab thống kê y tá: xem hiệu suất và lịch sử xử lý
 - Giao diện tối ưu: xám/trắng với đỏ cho cảnh báo
 
 ![React Dashboard](assets/web.png)
@@ -354,6 +389,17 @@ Body: { "username": "admin", "password": "admin123" }
 Response: { "success": true, "token": "jwt_token_here" }
 ```
 
+### Nurse Management
+```
+GET /api/users
+POST /api/users
+DELETE /api/users/:id
+GET /api/nurses/stats/all
+GET /api/nurses/:nurseId/logs
+POST /api/calls/complete-with-nurse
+POST /api/init
+```
+
 ### Logs (cần JWT token)
 ```
 GET /api/logs
@@ -369,16 +415,23 @@ Body: { "roomId": "101", "callType": "Emergency" }
 Response: { "success": true, "message": "Call completed" }
 ```
 
+### GUI Call Completion with Nurse
+```
+POST /api/calls/complete-with-nurse
+Body: { "roomId": "101", "callType": "Emergency", "nurseName": "Nguyễn Văn A", "nurseId": 1 }
+Response: { "success": true, "message": "Call from room 101 marked as completed by Nguyễn Văn A" }
+```
+
 ## 🔄 Kiến trúc Hệ thống
 
 ```
 Device/Arduino
      ↓
-C# GUI (Form1.cs) - Xác nhận xử lý
+C# GUI (LoginForm.cs → Form1.cs) - Đăng nhập y tá, xác nhận xử lý
      ↓
 Backend API (Node.js/Express)
-     ├→ WebSocket broadcast
-     └→ SQLite Database
+  ├→ WebSocket broadcast
+  └→ SQLite Database + nurse management
      ↑
 React Dashboard - Nhận cảnh báo real-time
 ```
@@ -386,7 +439,7 @@ React Dashboard - Nhận cảnh báo real-time
 **Permission Model:**
 - **C# GUI**: WRITE access (gọi API để cập nhật)
 - **Backend**: READ-WRITE (database source of truth)
-- **Web Dashboard**: READ-ONLY (nhận data qua WebSocket)
+- **Web Dashboard**: READ-ONLY + admin nurse management
 
 ## 🧪 Testing
 
@@ -400,6 +453,9 @@ curl http://localhost:5000/api/health
 curl -X POST http://localhost:5000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin123"}'
+
+# Tạo dữ liệu demo
+curl -X POST http://localhost:5000/api/init
 
 # Get logs (thay TOKEN bằng jwt token từ login)
 curl -H "Authorization: Bearer TOKEN" \
@@ -442,6 +498,7 @@ web-nursecall/
 ├── C#/
 │   └── NurseCall/
 │       ├── NurseCall.sln         # Visual Studio solution
+│       ├── LoginForm.cs          # Nurse login screen
 │       ├── Form1.cs              # Main Y tá interface
 │       ├── Form1.Designer.cs     # UI designer file
 │       ├── DatabaseHelper.cs     # SQLite operations
@@ -464,7 +521,7 @@ web-nursecall/
 └── ... (config files)
 
 **Key Files by Role:**
-- Y tá (Nursing Staff): C#/NurseCall/Form1.cs
+- Y tá (Nursing Staff): C#/NurseCall/LoginForm.cs, C#/NurseCall/Form1.cs
 - Backend (API): backend/index.js
 - Admin (Web): frontend/src/components/Dashboard.jsx
 - Arduino (Hardware): sketch_apr28a/sketch_apr28a.ino
@@ -499,6 +556,7 @@ web-nursecall/
    - Shared between C# GUI and backend
    - Source of truth for all call data
    - Real-time sync via WebSocket
+  - User management tables: Users, NurseStats
 
 ## 🐛 Gỡ lỗi
 
@@ -510,6 +568,23 @@ web-nursecall/
 2. Đảm bảo đường dẫn tồn tại hoặc folder tồn tại
 3. Kiểm tra quyền đọc/ghi folder
 4. Nếu C# app đang dùng DB, đảm bảo backend mở READ-ONLY
+
+### Thống kê y tá hiển thị 0
+**Lỗi**: Tổng yêu cầu, đã xử lý, tỷ lệ và thời gian TB đều bằng 0
+
+**Giải pháp**:
+1. Restart backend để load logic aggregate từ Logs
+2. Kiểm tra y tá đã xử lý call bằng endpoint `/api/calls/complete-with-nurse`
+3. Đảm bảo `Logs.NurseName` hoặc `CompletedBy` có dữ liệu
+4. Gọi `GET /api/nurses/stats/all` để xem số liệu mới
+
+### Thời gian phản hồi âm
+**Lỗi**: `-419 phút` hoặc `-25198s`
+
+**Giải pháp**:
+1. Backend đã chuyển sang ghi ResponseTime theo local time
+2. Dữ liệu cũ vẫn có thể âm, nhưng khi hiển thị sẽ được chặn về 0
+3. Xóa dữ liệu test cũ nếu muốn số liệu sạch hoàn toàn
 
 ### Frontend không kết nối backend
 **Lỗi**: `Network Error` hoặc `Failed to connect`
