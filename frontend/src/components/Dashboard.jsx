@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, CheckCircle2, Phone, AlertCircle, LogOut } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, Phone, AlertCircle, LogOut, Users, TrendingUp } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { StatCard, EmergencyAlert } from './Cards';
 import { LogsTable } from './LogsTable';
 import { RoomCallsChart, EmergencyDistribution, CompletionRateChart } from './Charts';
 import { AlertNotifications } from './AlertNotifications';
+import AdminUsers from './AdminUsers';
+import NurseStats from './NurseStats';
 import { logsService, authService } from '../services/api';
 
 const SOCKET_URL = 'http://localhost:5000';
@@ -19,6 +21,7 @@ export const Dashboard = ({ onLogout }) => {
   const [serverStatus, setServerStatus] = useState('connecting');
   const [alerts, setAlerts] = useState([]);
   const [previousEmergencyCount, setPreviousEmergencyCount] = useState(0);
+  const [activeTab, setActiveTab] = useState('dashboard');
   const user = authService.getUser();
 
   // Fetch data from API
@@ -190,79 +193,132 @@ export const Dashboard = ({ onLogout }) => {
               </div>
             </div>
           </div>
+
+          {/* Tab Navigation */}
+          <div className="mt-4 flex gap-4 border-t pt-4">
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                activeTab === 'dashboard'
+                  ? 'bg-gray-800 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <Activity className="w-5 h-5" />
+              Bảng Điều Khiển
+            </button>
+
+            <button
+              onClick={() => setActiveTab('stats')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                activeTab === 'stats'
+                  ? 'bg-gray-800 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <TrendingUp className="w-5 h-5" />
+              Thống Kê Y Tá
+            </button>
+
+            {user?.role === 'admin' && (
+              <button
+                onClick={() => setActiveTab('users')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                  activeTab === 'users'
+                    ? 'bg-gray-800 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <Users className="w-5 h-5" />
+                Quản Lý Y Tá
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Statistics Cards */}
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <StatCard
-            title="Tổng cuộc gọi"
-            value={stats?.totalLogs || 0}
-            icon={Activity}
-            bgColor="bg-gray-800"
-            textColor="text-gray-100"
-            loading={loading}
-          />
-          <StatCard
-            title="Cuộc gọi khẩn cấp"
-            value={stats?.totalEmergency || 0}
-            icon={AlertTriangle}
-            bgColor="bg-red-600"
-            textColor="text-red-100"
-            loading={loading}
-          />
-          <StatCard
-            title="Đã hoàn thành"
-            value={stats?.completedLogs || 0}
-            icon={CheckCircle2}
-            bgColor="bg-gray-700"
-            textColor="text-gray-100"
-            loading={loading}
-          />
-          <StatCard
-            title="Tỷ lệ hoàn thành"
-            value={`${stats?.completionRate || 0}%`}
-            icon={Activity}
-            bgColor="bg-gray-600"
-            textColor="text-gray-100"
-            loading={loading}
-          />
-        </section>
+        {activeTab === 'dashboard' && (
+          <>
+            {/* Statistics Cards */}
+            <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+              <StatCard
+                title="Tổng cuộc gọi"
+                value={stats?.totalLogs || 0}
+                icon={Activity}
+                bgColor="bg-gray-800"
+                textColor="text-gray-100"
+                loading={loading}
+              />
+              <StatCard
+                title="Cuộc gọi khẩn cấp"
+                value={stats?.totalEmergency || 0}
+                icon={AlertTriangle}
+                bgColor="bg-red-600"
+                textColor="text-red-100"
+                loading={loading}
+              />
+              <StatCard
+                title="Đã hoàn thành"
+                value={stats?.completedLogs || 0}
+                icon={CheckCircle2}
+                bgColor="bg-gray-700"
+                textColor="text-gray-100"
+                loading={loading}
+              />
+              <StatCard
+                title="Tỷ lệ hoàn thành"
+                value={`${stats?.completionRate || 0}%`}
+                icon={Activity}
+                bgColor="bg-gray-600"
+                textColor="text-gray-100"
+                loading={loading}
+              />
+            </section>
 
-        {/* Emergency Alert */}
-        <section className="mb-8">
-          <EmergencyAlert count={stats?.pendingEmergency || 0} loading={loading} />
-        </section>
+            {/* Emergency Alert */}
+            <section className="mb-8">
+              <EmergencyAlert count={stats?.pendingEmergency || 0} loading={loading} />
+            </section>
 
-        {/* Charts Section */}
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          <div className="lg:col-span-2">
-            <RoomCallsChart data={roomData} loading={loading} />
-          </div>
-          <div>
-            <EmergencyDistribution stats={stats} loading={loading} />
-          </div>
-        </section>
+            {/* Charts Section */}
+            <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+              <div className="lg:col-span-2">
+                <RoomCallsChart data={roomData} loading={loading} />
+              </div>
+              <div>
+                <EmergencyDistribution stats={stats} loading={loading} />
+              </div>
+            </section>
 
-        <section className="mb-8">
-          <CompletionRateChart stats={stats} loading={loading} />
-        </section>
+            <section className="mb-8">
+              <CompletionRateChart stats={stats} loading={loading} />
+            </section>
 
-        {/* Logs Table */}
-        <section className="mb-8">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-bold text-gray-800">Cuộc gọi gần đây</h2>
-            <button
-              onClick={fetchData}
-              className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-medium transition-colors"
-            >
-              Làm mới
-            </button>
-          </div>
-          <LogsTable logs={logs} loading={loading} />
-        </section>
+            {/* Logs Table */}
+            <section className="mb-8">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold text-gray-800">Cuộc gọi gần đây</h2>
+                <button
+                  onClick={fetchData}
+                  className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                >
+                  Làm mới
+                </button>
+              </div>
+              <LogsTable logs={logs} loading={loading} />
+            </section>
+          </>
+        )}
+
+        {activeTab === 'stats' && (
+          <NurseStats />
+        )}
+
+        {activeTab === 'users' && user?.role === 'admin' && (
+          <AdminUsers />
+        )}
       </main>
 
       {/* Footer */}

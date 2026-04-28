@@ -110,10 +110,114 @@ function openDatabaseWrite() {
   });
 }
 
+// Initialize database - tạo tables nếu chưa có
+async function initializeDatabase() {
+  try {
+    const db = await openDatabaseWrite();
+
+    // Tạo Users table
+    db.run(`CREATE TABLE IF NOT EXISTS Users (
+      Id INTEGER PRIMARY KEY AUTOINCREMENT,
+      Username TEXT UNIQUE NOT NULL,
+      Password TEXT NOT NULL,
+      FullName TEXT,
+      CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      IsActive INTEGER DEFAULT 1
+    )`, (err) => {
+      if (err) console.error('Error creating Users table:', err);
+      else console.log('✓ Users table ready');
+    });
+
+    // Tạo NurseStats table
+    db.run(`CREATE TABLE IF NOT EXISTS NurseStats (
+      Id INTEGER PRIMARY KEY AUTOINCREMENT,
+      UserId INTEGER UNIQUE,
+      TotalCalls INTEGER DEFAULT 0,
+      CompletedCalls INTEGER DEFAULT 0,
+      AverageResponseTime REAL DEFAULT 0,
+      LastUpdate DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(UserId) REFERENCES Users(Id)
+    )`, (err) => {
+      if (err) console.error('Error creating NurseStats table:', err);
+      else console.log('✓ NurseStats table ready');
+    });
+
+    // Cập nhật Logs table - thêm cột nếu chưa có
+    db.run(`ALTER TABLE Logs ADD COLUMN NurseName TEXT DEFAULT 'Unknown'`, (err) => {
+      if (err && !err.message.includes('duplicate')) console.error('Error adding NurseName column:', err);
+      else if (!err) console.log('✓ NurseName column added to Logs');
+    });
+
+    db.run(`ALTER TABLE Logs ADD COLUMN CompletedBy TEXT`, (err) => {
+      if (err && !err.message.includes('duplicate')) console.error('Error adding CompletedBy column:', err);
+      else if (!err) console.log('✓ CompletedBy column added to Logs');
+    });
+
+    db.close();
+  } catch (error) {
+    console.error('Error initializing database:', error);
+  }
+}
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Server is running' });
 });
+
+// Initialize endpoint - tạo user admin + demo
+app.post('/api/init', async (req, res) => {
+  try {
+    const db = await openDatabaseWrite();
+    const crypto = require('crypto');
+
+    // Tạo user admin nếu chưa có
+    const adminHash = crypto.createHash('sha256').update('admin123').digest('base64');
+    db.run(
+      `INSERT OR IGNORE INTO Users (Username, Password, FullName, IsActive) VALUES ('admin', ?, 'Administrator', 1)`,
+      [adminHash],
+      function(err) {
+        if (err) console.error('Error creating admin:', err);
+        else if (this.changes) console.log('✓ Admin user created');
+      }
+    );
+
+    // Tạo user demo nurse nếu chưa có
+    const nurseHash = crypto.createHash('sha256').update('nurse123').digest('base64');
+    db.run(
+      `INSERT OR IGNORE INTO Users (Username, Password, FullName, IsActive) VALUES ('nurse1', ?, 'Nguyễn Thị Y Tá 1', 1)`,
+      [nurseHash],
+      function(err) {
+        if (err) console.error('Error creating nurse:', err);
+        else if (this.changes) console.log('✓ Demo nurse user created');
+      }
+    );
+
+    // Tạo NurseStats cho nurse nếu chưa có
+    db.run(
+      `INSERT OR IGNORE INTO NurseStats (UserId, TotalCalls, CompletedCalls, AverageResponseTime)
+       SELECT Id, 0, 0, 0 FROM Users WHERE Username = 'nurse1' AND Id NOT IN (SELECT UserId FROM NurseStats)`,
+      function(err) {
+        db.close();
+        if (err) console.error('Error creating nurse stats:', err);
+        else {
+          res.json({
+            success: true,
+            message: 'Database initialized successfully',
+            credentials: {
+              admin: { username: 'admin', password: 'admin123' },
+              nurse: { username: 'nurse1', password: 'nurse123' }
+            }
+          });
+        }
+      }
+    );
+  } catch (error) {
+    console.error('Error in /api/init:', error);
+    res.status(500).json({ error: 'Failed to initialize database' });
+  }
+});
+
+// Health check endpoint
 
 // GET all logs
 app.get('/api/logs', async (req, res) => {
@@ -216,6 +320,351 @@ app.get('/api/logs/by-room', async (req, res) => {
   }
 });
 
+// ============= USER MANAGEMENT ENDPOINTS =============
+
+// GET: Danh sách tất cả users (chỉ admin)
+app.get('/api/users', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const db = await openDatabase();
+
+    db.all(
+      `SELECT Id, Username, FullName, CreatedAt, IsActive FROM Users ORDER BY CreatedAt DESC`,
+      (err, rows) => {
+        db.close();
+
+        if (err) {
+          console.error('Error fetching users:', err);
+          return res.status(500).json({ error: 'Failed to fetch users' });
+        }
+
+        res.json(rows || []);
+      }
+    );
+  } catch (error) {
+    console.error('Error in /api/users:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST: Tạo user mới (chỉ admin)
+app.post('/api/users', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const { username, password, fullName } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password required' });
+    }
+
+    const db = await openDatabaseWrite();
+
+    // Mã hóa password
+    const crypto = require('crypto');
+    const hashedPassword = crypto.createHash('sha256').update(password).digest('base64');
+
+    const insertUserQuery = `
+      INSERT INTO Users (Username, Password, FullName, IsActive)
+      VALUES (?, ?, ?, 1)
+    `;
+
+    db.run(insertUserQuery, [username, hashedPassword, fullName || username], function(err) {
+      if (err) {
+        db.close();
+        if (err.message.includes('UNIQUE')) {
+          return res.status(409).json({ error: 'Username already exists' });
+        }
+        console.error('Error creating user:', err);
+        return res.status(500).json({ error: 'Failed to create user' });
+      }
+
+      const userId = this.lastID;
+
+      // Tạo NurseStats cho user mới
+      const insertStatsQuery = `
+        INSERT INTO NurseStats (UserId, TotalCalls, CompletedCalls, AverageResponseTime)
+        VALUES (?, 0, 0, 0)
+      `;
+
+      db.run(insertStatsQuery, [userId], function(err) {
+        db.close();
+
+        if (err) {
+          console.error('Error creating stats:', err);
+          return res.status(500).json({ error: 'Failed to create stats' });
+        }
+
+        console.log(`New user created: ${username} (ID: ${userId})`);
+
+        res.status(201).json({
+          success: true,
+          userId: userId,
+          message: `User ${username} created successfully`
+        });
+      });
+    });
+  } catch (error) {
+    console.error('Error in POST /api/users:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE: Xóa user (chỉ admin)
+app.delete('/api/users/:id', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const userId = req.params.id;
+    const db = await openDatabaseWrite();
+
+    const updateQuery = `UPDATE Users SET IsActive = 0 WHERE Id = ?`;
+
+    db.run(updateQuery, [userId], function(err) {
+      db.close();
+
+      if (err) {
+        console.error('Error deleting user:', err);
+        return res.status(500).json({ error: 'Failed to delete user' });
+      }
+
+      res.json({ success: true, message: 'User deleted successfully' });
+    });
+  } catch (error) {
+    console.error('Error in DELETE /api/users:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET: Thống kê của một y tá
+app.get('/api/nurses/:nurseId/stats', async (req, res) => {
+  try {
+    const nurseId = req.params.nurseId;
+    const db = await openDatabase();
+
+    db.get(
+      `SELECT 
+        u.Id,
+        u.FullName,
+        u.Username,
+        COALESCE(COUNT(l.Id), 0) AS TotalCalls,
+        COALESCE(SUM(CASE WHEN l.Status = 'Completed' THEN 1 ELSE 0 END), 0) AS CompletedCalls,
+        COALESCE(ROUND(AVG(CASE 
+          WHEN l.Status = 'Completed' AND l.ResponseTime IS NOT NULL AND l.RequestTime IS NOT NULL THEN
+            CASE
+              WHEN (julianday(l.ResponseTime) - julianday(l.RequestTime)) * 86400 < 0 THEN 0
+              ELSE (julianday(l.ResponseTime) - julianday(l.RequestTime)) * 86400
+            END
+        END), 0), 0) AS AverageResponseTime,
+        CASE
+          WHEN COUNT(l.Id) = 0 THEN 0
+          ELSE ROUND((SUM(CASE WHEN l.Status = 'Completed' THEN 1 ELSE 0 END) * 100.0 / COUNT(l.Id)), 2)
+        END AS CompletionRate,
+        datetime('now') AS LastUpdate
+      FROM Users u
+      LEFT JOIN Logs l ON (l.NurseName = u.FullName OR l.CompletedBy = u.FullName)
+      WHERE u.Id = ?
+      GROUP BY u.Id, u.FullName, u.Username`,
+      [nurseId],
+      (err, row) => {
+        db.close();
+
+        if (err) {
+          console.error('Error fetching nurse stats:', err);
+          return res.status(500).json({ error: 'Failed to fetch stats' });
+        }
+
+        res.json(row || {});
+      }
+    );
+  } catch (error) {
+    console.error('Error in /api/nurses/:nurseId/stats:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET: Thống kê tất cả y tá
+app.get('/api/nurses/stats/all', async (req, res) => {
+  try {
+    const db = await openDatabase();
+
+    db.all(
+      `SELECT 
+        u.Id,
+        u.FullName,
+        COALESCE(COUNT(l.Id), 0) AS TotalCalls,
+        COALESCE(SUM(CASE WHEN l.Status = 'Completed' THEN 1 ELSE 0 END), 0) AS CompletedCalls,
+        COALESCE(ROUND(AVG(CASE 
+          WHEN l.Status = 'Completed' AND l.ResponseTime IS NOT NULL AND l.RequestTime IS NOT NULL THEN
+            CASE
+              WHEN (julianday(l.ResponseTime) - julianday(l.RequestTime)) * 86400 < 0 THEN 0
+              ELSE (julianday(l.ResponseTime) - julianday(l.RequestTime)) * 86400
+            END
+        END), 0), 0) AS AverageResponseTime,
+        CASE
+          WHEN COUNT(l.Id) = 0 THEN 0
+          ELSE ROUND((SUM(CASE WHEN l.Status = 'Completed' THEN 1 ELSE 0 END) * 100.0 / COUNT(l.Id)), 2)
+        END AS CompletionRate
+      FROM Users u
+      LEFT JOIN Logs l ON (l.NurseName = u.FullName OR l.CompletedBy = u.FullName)
+      WHERE u.IsActive = 1
+      GROUP BY u.Id, u.FullName
+      ORDER BY CompletedCalls DESC`,
+      (err, rows) => {
+        db.close();
+
+        if (err) {
+          console.error('Error fetching all nurse stats:', err);
+          return res.status(500).json({ error: 'Failed to fetch stats' });
+        }
+
+        res.json(rows || []);
+      }
+    );
+  } catch (error) {
+    console.error('Error in /api/nurses/stats/all:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET: Lịch sử xử lý của một y tá
+app.get('/api/nurses/:nurseId/logs', async (req, res) => {
+  try {
+    const nurseId = req.params.nurseId;
+    const db = await openDatabase();
+
+    db.get(
+      `SELECT FullName FROM Users WHERE Id = ?`,
+      [nurseId],
+      (err, user) => {
+        if (err || !user) {
+          db.close();
+          return res.status(404).json({ error: 'Nurse not found' });
+        }
+
+        const nurseName = user.FullName;
+
+        db.all(
+          `SELECT 
+            Id, 
+            RoomId, 
+            CallType, 
+            RequestTime, 
+            ResponseTime,
+            Status,
+            CAST(MAX((julianday(ResponseTime) - julianday(RequestTime)) * 24 * 60, 0) as INTEGER) as ResponseMinutes
+          FROM Logs
+          WHERE NurseName = ? OR CompletedBy = ?
+          ORDER BY RequestTime DESC
+          LIMIT 100`,
+          [nurseName, nurseName],
+          (err, rows) => {
+            db.close();
+
+            if (err) {
+              console.error('Error fetching nurse logs:', err);
+              return res.status(500).json({ error: 'Failed to fetch logs' });
+            }
+
+            res.json(rows || []);
+          }
+        );
+      }
+    );
+  } catch (error) {
+    console.error('Error in /api/nurses/:nurseId/logs:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST: Cập nhật call complete với tên y tá (từ C# WinForms)
+app.post('/api/calls/complete-with-nurse', async (req, res) => {
+  try {
+    const { roomId, callType, nurseName, nurseId } = req.body;
+
+    if (!roomId || !callType || !nurseName) {
+      return res.status(400).json({ error: 'roomId, callType, and nurseName required' });
+    }
+
+    const db = await openDatabaseWrite();
+
+    // Tìm call pending mới nhất
+    const findQuery = `
+      SELECT Id FROM Logs 
+      WHERE RoomId = ? 
+      AND CallType = ? 
+      AND Status = 'Pending'
+      ORDER BY RequestTime DESC 
+      LIMIT 1
+    `;
+
+    db.get(findQuery, [roomId, callType], function(err, row) {
+      if (err) {
+        db.close();
+        console.error('Error finding call:', err);
+        return res.status(500).json({ error: 'Failed to find call' });
+      }
+
+      if (!row) {
+        db.close();
+        return res.status(404).json({ error: 'No pending call found' });
+      }
+
+      // Update call với nurse info
+      const updateQuery = `
+        UPDATE Logs 
+        SET 
+          Status = 'Completed', 
+          ResponseTime = datetime('now', 'localtime'),
+          NurseName = ?,
+          CompletedBy = ?
+        WHERE Id = ?
+      `;
+
+      db.run(updateQuery, [nurseName, nurseName, row.Id], function(err) {
+        db.close();
+
+        if (err) {
+          console.error('Error updating call:', err);
+          return res.status(500).json({ error: 'Failed to complete call' });
+        }
+
+        console.log(`Call completed by ${nurseName}: Room ${roomId} - ${callType} (ID: ${row.Id})`);
+
+        // Broadcast real-time update tới Web
+        io.emit('call-completed', {
+          roomId: parseInt(roomId),
+          callType: callType,
+          nurseName: nurseName,
+          status: 'Completed',
+          timestamp: new Date()
+        });
+
+        io.emit('log-update', {
+          message: `${nurseName} đã hoàn thành xử lý yêu cầu từ phòng ${roomId}`,
+          type: 'completion',
+          nurseName: nurseName
+        });
+
+        res.json({
+          success: true,
+          message: `Call from room ${roomId} marked as completed by ${nurseName}`
+        });
+      });
+    });
+  } catch (error) {
+    console.error('Error in /api/calls/complete-with-nurse:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // POST - GUI xác nhận hoàn thành xử lý (từ Form1.cs)
 app.post('/api/calls/complete', async (req, res) => {
   try {
@@ -252,7 +701,7 @@ app.post('/api/calls/complete', async (req, res) => {
       // Update the found call
       const updateQuery = `
         UPDATE Logs 
-        SET Status = 'Completed', ResponseTime = datetime('now')
+        SET Status = 'Completed', ResponseTime = datetime('now', 'localtime')
         WHERE Id = ?
       `;
 
@@ -395,6 +844,10 @@ async function broadcastUpdates() {
 
 // Broadcast updates every 4 seconds
 setInterval(broadcastUpdates, 4000);
+
+// Initialize database tables
+console.log('Initializing database tables...');
+initializeDatabase();
 
 // Start server
 server.listen(PORT, () => {
