@@ -34,7 +34,7 @@ Xây dựng hệ thống gọi y tá IoT thực thời, cho phép:
 | **jsonwebtoken** | ^9.0.0 | JWT authentication & authorization |
 | **cors** | ^2.8.5 | CORS middleware cho frontend/GUI |
 | **dotenv** | ^16.3.1 | Environment variables (.env) |
-| **bcryptjs** | ^2.4.3 | Password hashing (planned) |
+| **crypto/SHA256** | Built-in | Password hashing for admin + nurse accounts |
 | **nodemon** | ^3.0.1 | Dev tool: auto-reload on changes |
 
 **Port:** 5000 (có thể thay đổi via `.env`)
@@ -82,6 +82,43 @@ Xây dựng hệ thống gọi y tá IoT thực thời, cho phép:
 
 ## 🗄️ DATABASE SCHEMA
 
+### Bảng: Users
+```sql
+CREATE TABLE Users (
+  Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  Username    TEXT UNIQUE NOT NULL,
+  Password    TEXT NOT NULL,
+  FullName    TEXT,
+  CreatedAt   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  IsActive    INTEGER DEFAULT 1
+);
+```
+
+**Cột giải thích:**
+- `Username` - Tên đăng nhập của y tá/admin
+- `Password` - Password đã hash SHA256
+- `FullName` - Họ tên hiển thị trên GUI/web
+- `IsActive` - Trạng thái tài khoản (1 = active, 0 = inactive)
+
+### Bảng: NurseStats
+```sql
+CREATE TABLE NurseStats (
+  Id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  UserId              INTEGER UNIQUE,
+  TotalCalls          INTEGER DEFAULT 0,
+  CompletedCalls      INTEGER DEFAULT 0,
+  AverageResponseTime REAL DEFAULT 0,
+  LastUpdate          DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(UserId) REFERENCES Users(Id)
+);
+```
+
+**Cột giải thích:**
+- `TotalCalls` - Tổng số call gắn với y tá
+- `CompletedCalls` - Số call hoàn thành
+- `AverageResponseTime` - Thời gian phản hồi trung bình (giây)
+- `LastUpdate` - Lần cập nhật gần nhất
+
 ### Bảng: Logs
 ```sql
 CREATE TABLE Logs (
@@ -90,7 +127,9 @@ CREATE TABLE Logs (
   CallType        TEXT CHECK(CallType IN ('Normal', 'Emergency')),
   RequestTime     DATETIME,
   ResponseTime    DATETIME,
-  Status          TEXT CHECK(Status IN ('Pending', 'Completed'))
+  Status          TEXT CHECK(Status IN ('Pending', 'Completed')),
+  NurseName       TEXT,
+  CompletedBy     TEXT
 );
 ```
 
@@ -101,6 +140,8 @@ CREATE TABLE Logs (
 - `RequestTime` - Thời gian gọi
 - `ResponseTime` - Thời gian hoàn thành
 - `Status` - "Pending" (chưa xử lý) hoặc "Completed" (đã xử lý)
+- `NurseName` - Tên y tá đã xử lý call
+- `CompletedBy` - Trường bổ sung để ghi nhận người hoàn thành
 
 **Vị trí file:** `C#/NurseCall/bin/Debug/nurse_call.db`
 
@@ -161,8 +202,8 @@ BUZZER Control:
 
 ### Login Credentials (Demo Mode)
 ```
-Username: admin
-Password: admin123
+Admin: admin / admin123
+Nurse: nurse1 / nurse123
 ```
 
 ### JWT Configuration
@@ -322,6 +363,17 @@ Response (500 Internal Error):
 }
 ```
 
+#### 7. Nurse Management
+```
+GET /api/users
+POST /api/users
+DELETE /api/users/:id
+GET /api/nurses/stats/all
+GET /api/nurses/:nurseId/logs
+POST /api/calls/complete-with-nurse
+POST /api/init
+```
+
 ### WebSocket Events (Real-time)
 
 #### Event: `call-completed`
@@ -426,10 +478,12 @@ src/
 ### Components Structure
 ```
 NurseCall/
+├── LoginForm.cs                # Nurse login screen (programmatic UI)
 ├── Form1.cs                     # Main GUI window
 │   ├── Serial port connection
 │   ├── Data grid view (queue)
 │   ├── Buttons: Connect/Disconnect
+│   ├── Nurse header + logout button
 │   ├── System log display
 │   └── Event handlers
 │
@@ -437,12 +491,16 @@ NurseCall/
 │   ├── DataGridView (dgvQueue)
 │   ├── ComboBox (COM port selection)
 │   ├── Buttons & labels
+│   ├── Nurse info panel
+│   ├── Logout button
 │   └── ListBox (system logs)
 │
 ├── DatabaseHelper.cs            # SQLite operations
 │   ├── InitializeDatabase()     # Create table if not exists
+│   ├── LoginUser()              # Nurse/admin authentication
+│   ├── CreateUser()             # Admin nurse creation
 │   ├── InsertCall()             # Add new call
-│   ├── CompleteCall()           # Mark as completed
+│   ├── CompleteCall()           # Mark as completed + nurseName
 │   ├── GetPendingCalls()        # Fetch pending
 │   └── Connection string config
 │
@@ -458,11 +516,13 @@ NurseCall/
 ### Key Features
 - **Serial Port:** 9600 baud, configurable COM port
 - **Database:** Local SQLite (nurse_call.db)
-- **API Integration:** HTTP POST to backend /api/calls/complete
+- **Authentication:** LoginForm trước khi vào main GUI
+- **API Integration:** HTTP POST to backend /api/calls/complete-with-nurse
 - **Fallback Mode:** Direct database update if API fails
 - **UI Language:** 100% Vietnamese
 - **Logging:** Color-coded log messages (✓ success, ✗ error)
 - **Queue Display:** Sortable DataGridView with action buttons
+- **Logout Flow:** Đăng xuất và quay lại LoginForm
 
 ---
 
@@ -530,15 +590,16 @@ if (Serial.available() > 0) {
    ↓
 
 4️⃣ GUI SENDS TO BACKEND
-   POST /api/calls/complete
-   { roomId: "1", callType: "Emergency" }
+  POST /api/calls/complete-with-nurse
+  { roomId: "1", callType: "Emergency", nurseName: "...", nurseId: 1 }
    ↓
 
 5️⃣ BACKEND PROCESSES
    Verifies roomId & callType
    Updates database:
-     Status: Pending → Completed
-     ResponseTime: NOW
+    Status: Pending → Completed
+    ResponseTime: local time
+    NurseName / CompletedBy: nurseName
    ↓
 
 6️⃣ BACKEND BROADCASTS
@@ -566,6 +627,7 @@ if (Serial.available() > 0) {
    Stats recalculate:
      - pendingEmergency decreases
      - completedLogs increases
+     - NurseStats / nurse performance recalculated from Logs
    Charts update
    Table refreshes
    ↓
@@ -679,7 +741,7 @@ web-nursecall/
 ### Development
 - ✅ Backend: `npm start` (http://localhost:5000)
 - ✅ Frontend: `npm run dev` (http://localhost:3000)
-- ✅ C# GUI: Ready to compile & run
+- ✅ C# GUI: LoginForm + Form1 ready to compile & run
 - ✅ Arduino: Ready to upload via Arduino IDE
 
 ### Production
@@ -717,7 +779,9 @@ bd6fe8e feat: Implement Node.js/Express backend with authentication
 - [x] CORS enabled for frontend + GUI
 - [x] WebSocket real-time broadcasting
 - [x] Error handling & logging
-- [x] All 6 API endpoints working
+- [x] User management APIs working
+- [x] Nurse stats APIs working
+- [x] All call-completion APIs working
 
 ### Frontend
 - [x] React components rendering correctly
@@ -734,6 +798,8 @@ bd6fe8e feat: Implement Node.js/Express backend with authentication
 - [x] Database initialization & operations
 - [x] API integration with fallback
 - [x] DataGridView queue display
+- [x] LoginForm authentication flow
+- [x] Nurse name display + logout flow
 - [x] Vietnamese UI
 - [x] Color-coded logging
 
@@ -749,26 +815,22 @@ bd6fe8e feat: Implement Node.js/Express backend with authentication
 
 ## 🎯 NEXT STEPS (KHÔNG TRONG MVP)
 
-1. **User Management**
-   - Multiple nurses with different permissions
-   - Role-based access control (Admin/Nurse/Manager)
-
-2. **Database Improvements**
+1. **Database Improvements**
    - Connection pooling for better performance
    - Backup & recovery mechanisms
 
-3. **Advanced Features**
+2. **Advanced Features**
    - Auto-escalation (upgrade call type if not handled)
    - Call statistics & reporting
    - Mobile app for nurses
 
-4. **Security Hardening**
-   - Password hashing with bcrypt
+3. **Security Hardening**
+  - Password hashing with bcrypt
    - HTTPS/TLS encryption
    - Input validation & sanitization
    - Rate limiting on API
 
-5. **Scalability**
+4. **Scalability**
    - Horizontal scaling (multiple backend instances)
    - Load balancing (nginx)
    - Caching layer (Redis)
@@ -785,6 +847,8 @@ bd6fe8e feat: Implement Node.js/Express backend with authentication
 | No audio alerts | Browser permissions | Click page first, check volume |
 | Database locked | Multiple access | Backend uses READ-ONLY for web |
 | JWT expired | Session timeout | Re-login (24h expiry) |
+| Nurse stats show 0 | Stats not recalculated yet | Restart backend and ensure calls use `/api/calls/complete-with-nurse` |
+| Response time negative | UTC/localtime mismatch in old rows | Backend now writes local time and clamps negative values |
 
 ---
 
