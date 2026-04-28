@@ -129,7 +129,40 @@ JWT_SECRET=generate-strong-random-key-here
 ✅ **API Integration**: REST endpoints cho C# GUI  
 ✅ **Fallback Mode**: GUI hoạt động nếu backend down  
 
-## 📡 API Endpoints
+## � Screenshots
+
+### 1. C# WinForms GUI - Giao diện Y tá
+Giao diện cho y tá xác nhận xử lý cuộc gọi từ bệnh nhân:
+- Kết nối COM port với Arduino
+- Bảng hàng đợi hiển thị cuộc gọi chờ xử lý
+- Phân biệt cuộc gọi khẩn cấp (hồng) và thường (xanh)
+- Nút "XÁC NHẬN XỰ LÝ" để hoàn thành
+- Nhật ký hệ thống theo dõi tất cả thao tác
+
+![C# GUI Dashboard](assets/gui.png)
+
+### 2. React Web Dashboard - Giao diện Quản trị
+Bảng điều khiển web cho quản trị viên giám sát real-time:
+- Thống kê tổng hợp: tổng cuộc gọi, khẩn cấp, đã hoàn thành, tỷ lệ %
+- Cảnh báo khẩn cấp nổi bật (màu đỏ) với thông báo âm thanh
+- Danh sách cuộc gọi chưa xử lý
+- Biểu đồ phân tích theo phòng và loại cuộc gọi
+- Giao diện tối ưu: xám/trắng với đỏ cho cảnh báo
+
+![React Dashboard](assets/web.png)
+
+### 3. Proteus 8 Circuit Design - Sơ đồ mạch điện
+Thiết kế mạch điện cho hệ thống phần cứng:
+- Arduino Uno làm bộ xử lý trung tâm
+- 4 nút bấm cho 4 phòng bệnh (P1, P2, P3, P4)
+- 8 LED chỉ báo trạng thái (4 xanh + 4 đỏ)
+- Buzzer để phát cảnh báo âm thanh
+- Module RS232 để kết nối với máy tính (COM port)
+- Thiết kế xử lý đơn giản, tin cậy
+
+![Proteus Circuit Diagram](assets/proteus.png)
+
+## �📡 API Endpoints
 
 ### Authentication
 ```
@@ -204,6 +237,10 @@ socket.on('data-update', (data) => console.log('Data updated:', data));
 
 ```
 web-nursecall/
+├── assets/
+│   ├── gui.png               # C# WinForms GUI screenshot
+│   ├── web.png               # React dashboard screenshot
+│   └── proteus.png           # Proteus circuit diagram screenshot
 ├── backend/
 │   ├── index.js              # Main API server
 │   ├── package.json          # Dependencies
@@ -220,15 +257,66 @@ web-nursecall/
 │   ├── vite.config.js        # Build config
 │   ├── tailwind.config.js    # Tailwind CSS config
 │   └── .gitignore
-└── README.md
+├── C#/
+│   └── NurseCall/
+│       ├── NurseCall.sln         # Visual Studio solution
+│       ├── Form1.cs              # Main Y tá interface
+│       ├── Form1.Designer.cs     # UI designer file
+│       ├── DatabaseHelper.cs     # SQLite operations
+│       ├── SerialPortManager.cs  # Arduino COM communication
+│       ├── bin/Debug/
+│       │   └── nurse_call.db     # Shared SQLite database
+│       └── ... (other C# project files)
+├── sketch_apr28a/
+│   ├── sketch_apr28a.ino         # Arduino firmware code
+│   │   └── Multi-room call logic
+│   │   └── Serial communication (REQ/DONE protocol)
+│   │   └── Emergency vs Normal call support
+│   └── build/
+│       └── arduino.avr.uno/      # Compiled Arduino binaries
+│           ├── sketch_apr28a.ino.hex
+│           ├── sketch_apr28a.ino.elf
+│           └── ... (other build artifacts)
+├── NurseSystem.zip              # Full C# project archive
+├── README.md                    # This file
+└── ... (config files)
 
-# C# GUI (tách folder - không trong repo này)
-../C#/NurseCall/NurseCall/
-├── Form1.cs                  # Y tá interface
-├── DatabaseHelper.cs         # Database operations
-└── bin/Debug/
-    └── nurse_call.db         # Shared database
+**Key Files by Role:**
+- Y tá (Nursing Staff): C#/NurseCall/Form1.cs
+- Backend (API): backend/index.js
+- Admin (Web): frontend/src/components/Dashboard.jsx
+- Arduino (Hardware): sketch_apr28a/sketch_apr28a.ino
+- Shared Database: C#/NurseCall/bin/Debug/nurse_call.db
+- Screenshots: assets/*.png
 ```
+
+**Component Architecture:**
+1. **Backend** (`backend/`): Node.js Express API server
+   - Manages SQLite database
+   - Broadcasts WebSocket events
+   - Provides REST endpoints for GUI & Web
+
+2. **Frontend** (`frontend/`): React web dashboard
+   - Admin interface with real-time monitoring
+   - Authentication with JWT
+   - Audio alerts & notifications
+
+3. **C# GUI** (`C#/NurseCall/`): WinForms application for nursing staff
+   - Connects to Arduino via COM port
+   - Confirms task completion
+   - Calls backend API
+   - Falls back to local database if offline
+
+4. **Arduino** (`sketch_apr28a/`): Microcontroller firmware
+   - Receives push button inputs from 4 rooms
+   - Sends call requests via serial port
+   - Receives completion confirmation
+   - Controls LED indicators & buzzer
+
+5. **Database** (`C#/NurseCall/bin/Debug/nurse_call.db`): SQLite
+   - Shared between C# GUI and backend
+   - Source of truth for all call data
+   - Real-time sync via WebSocket
 
 ## 🐛 Gỡ lỗi
 
