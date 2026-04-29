@@ -4,6 +4,8 @@ const int btnEmergency[] = {3, 5, 7, 12};
 const int ledNormal[] = {A0, A2, A4, 8};
 const int ledEmergency[] = {A1, A3, A5, 9};
 const int buzzerPin = 10;
+bool prevNormalState[numRooms];
+bool prevEmergencyState[numRooms];
 
 void setup() {
   Serial.begin(9600);
@@ -13,6 +15,8 @@ void setup() {
     pinMode(btnEmergency[i], INPUT_PULLUP);
     pinMode(ledNormal[i], OUTPUT);
     pinMode(ledEmergency[i], OUTPUT);
+    prevNormalState[i] = HIGH;
+    prevEmergencyState[i] = HIGH;
   }
   
   // Dòng này để test: Nếu LED tự tắt mà dòng này hiện lên C# -> Arduino bị reset
@@ -22,20 +26,28 @@ void setup() {
 void loop() {
   // 1. Quét trạng thái nút nhấn
   for (int i = 0; i < numRooms; i++) {
-    if (digitalRead(btnNormal[i]) == LOW) {
+    bool normalState = digitalRead(btnNormal[i]);
+    bool emergencyState = digitalRead(btnEmergency[i]);
+
+    // Chi xu ly mot lan khi vua nhan nut (HIGH -> LOW).
+    if (prevNormalState[i] == HIGH && normalState == LOW) {
       digitalWrite(ledNormal[i], HIGH);
       Serial.print("REQ:");
       Serial.print(i + 1);
       Serial.println(":N");
-      delay(300); // Chống dội
+      delay(80);
     }
-    if (digitalRead(btnEmergency[i]) == LOW) {
+
+    if (prevEmergencyState[i] == HIGH && emergencyState == LOW) {
       digitalWrite(ledEmergency[i], HIGH);
       Serial.print("REQ:");
       Serial.print(i + 1);
       Serial.println(":E");
-      delay(300);
+      delay(80);
     }
+
+    prevNormalState[i] = normalState;
+    prevEmergencyState[i] = emergencyState;
   }
 
   // 2. Nhận lệnh bằng C-string (Mượt mà, không tốn RAM, chống Crash)
@@ -57,11 +69,12 @@ void loop() {
       char type = buffer[7];            // Lấy thẳng ký tự 'N' hoặc 'E'
 
       if (roomId >= 0 && roomId < numRooms) {
+        // Chi tat LED dung theo loai DONE duoc gui tu C#.
         if (type == 'N') {
-          digitalWrite(ledNormal[roomId], LOW);     // Chỉ tắt đúng LED Thường
+          digitalWrite(ledNormal[roomId], LOW);
         } 
         else if (type == 'E') {
-          digitalWrite(ledEmergency[roomId], LOW);  // Chỉ tắt đúng LED Khẩn
+          digitalWrite(ledEmergency[roomId], LOW);
         }
       }
     } 
