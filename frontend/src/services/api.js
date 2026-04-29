@@ -105,3 +105,17 @@ export const logsService = {
     }
   }
 };
+
+export const reportService = {
+  getReport: async (from, to) => {
+    try {
+      const response = await apiClient.get('/reports', {
+        params: { from, to }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching report:', error);
+      throw error;
+    }
+  }
+};

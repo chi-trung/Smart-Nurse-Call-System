@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, CheckCircle2, Phone, AlertCircle, LogOut, Users, TrendingUp } from 'lucide-react';
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  Phone,
+  AlertCircle,
+  LogOut,
+  Users,
+  TrendingUp,
+  FileText
+} from 'lucide-react';
 import { io } from 'socket.io-client';
 import { StatCard, EmergencyAlert } from './Cards';
 import { LogsTable } from './LogsTable';
@@ -7,6 +17,7 @@ import { RoomCallsChart, EmergencyDistribution, CompletionRateChart } from './Ch
 import { AlertNotifications } from './AlertNotifications';
 import AdminUsers from './AdminUsers';
 import NurseStats from './NurseStats';
+import Reports from './reports/Reports';
 import { logsService, authService } from '../services/api';
 
 const SOCKET_URL = 'http://localhost:5000';
@@ -220,6 +231,18 @@ export const Dashboard = ({ onLogout }) => {
               Thống Kê Y Tá
             </button>
 
+            <button
+              onClick={() => setActiveTab('reports')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                activeTab === 'reports'
+                  ? 'bg-gray-800 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <FileText className="w-5 h-5" />
+              Báo Cáo
+            </button>
+
             {user?.role === 'admin' && (
               <button
                 onClick={() => setActiveTab('users')}
@@ -314,6 +337,10 @@ export const Dashboard = ({ onLogout }) => {
 
         {activeTab === 'stats' && (
           <NurseStats />
+        )}
+
+        {activeTab === 'reports' && (
+          <Reports />
         )}
 
         {activeTab === 'users' && user?.role === 'admin' && (

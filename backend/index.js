@@ -110,6 +110,47 @@ function openDatabaseWrite() {
   });
 }
 
+function dbGet(db, query, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(query, params, (err, row) => {
+      if (err) return reject(err);
+      resolve(row);
+    });
+  });
+}
+
+function dbAll(db, query, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(query, params, (err, rows) => {
+      if (err) return reject(err);
+      resolve(rows);
+    });
+  });
+}
+
+function buildDateFilter(from, to) {
+  const params = [];
+  let clause = '';
+
+  if (from && to) {
+    clause = 'RequestTime BETWEEN ? AND ?';
+    params.push(from, to);
+  } else if (from) {
+    clause = 'RequestTime >= ?';
+    params.push(from);
+  } else if (to) {
+    clause = 'RequestTime <= ?';
+    params.push(to);
+  }
+
+  return { clause, params };
+}
+
+function appendCondition(whereClause, condition) {
+  if (!whereClause) return `WHERE ${condition}`;
+  return `${whereClause} AND ${condition}`;
+}
+
 // Initialize database - tạo tables nếu chưa có
 async function initializeDatabase() {
   try {
@@ -317,6 +358,123 @@ app.get('/api/logs/by-room', async (req, res) => {
   } catch (error) {
     console.error('Error in /api/logs/by-room:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET reports (summary + detail) with date filters
+app.get('/api/reports', async (req, res) => {
+  let db;
+
+  try {
+    const { from, to } = req.query;
+    const { clause, params } = buildDateFilter(from, to);
+    const whereClause = clause ? `WHERE ${clause}` : '';
+    const completedWhere = appendCondition(whereClause, "Status = 'Completed'");
+
+    const responseSecondsExpr = `CASE
+      WHEN ResponseTime IS NOT NULL AND RequestTime IS NOT NULL THEN
+        CASE
+          WHEN (julianday(ResponseTime) - julianday(RequestTime)) * 86400 < 0 THEN 0
+          ELSE (julianday(ResponseTime) - julianday(RequestTime)) * 86400
+        END
+      ELSE NULL
+    END`;
+
+    db = await openDatabase();
+
+    const summaryQuery = `
+      SELECT
+        COUNT(*) as totalCalls,
+        SUM(CASE WHEN CallType = 'Emergency' THEN 1 ELSE 0 END) as emergencyCalls,
+        SUM(CASE WHEN CallType != 'Emergency' THEN 1 ELSE 0 END) as normalCalls,
+        SUM(CASE WHEN Status = 'Completed' THEN 1 ELSE 0 END) as completedCalls,
+        SUM(CASE WHEN Status != 'Completed' THEN 1 ELSE 0 END) as pendingCalls,
+        ROUND(AVG(${responseSecondsExpr}), 2) as avgResponseSeconds
+      FROM Logs
+      ${whereClause}
+    `;
+
+    const logsQuery = `
+      SELECT
+        Id,
+        RoomId,
+        CallType,
+        RequestTime,
+        ResponseTime,
+        Status,
+        COALESCE(NULLIF(CompletedBy, ''), NULLIF(NurseName, ''), 'Unknown') as NurseName,
+        CAST(${responseSecondsExpr} as INTEGER) as ResponseSeconds
+      FROM Logs
+      ${whereClause}
+      ORDER BY RequestTime DESC
+    `;
+
+    const nurseStatsQuery = `
+      SELECT
+        COALESCE(NULLIF(TRIM(CompletedBy), ''), NULLIF(TRIM(NurseName), ''), 'Unknown') as NurseName,
+        COUNT(*) as totalCalls,
+        ROUND(AVG(${responseSecondsExpr}), 2) as avgResponseSeconds
+      FROM Logs
+      ${completedWhere}
+        AND (
+          (CompletedBy IS NOT NULL AND TRIM(CompletedBy) != '')
+          OR (NurseName IS NOT NULL AND TRIM(NurseName) != '')
+        )
+        AND COALESCE(NULLIF(TRIM(CompletedBy), ''), NULLIF(TRIM(NurseName), '')) NOT IN (
+          'Unknown', 'Pending', 'Chua xu ly', 'Ch\u01b0a x\u1eed l\u00fd', 'Ch\u1edd x\u1eed l\u00fd'
+        )
+      GROUP BY COALESCE(NULLIF(TRIM(CompletedBy), ''), NULLIF(TRIM(NurseName), ''), 'Unknown')
+      HAVING NurseName != 'Unknown'
+      ORDER BY totalCalls DESC
+    `;
+
+    const byRoomQuery = `
+      SELECT
+        RoomId,
+        COUNT(*) as callCount
+      FROM Logs
+      ${whereClause}
+      GROUP BY RoomId
+      ORDER BY callCount DESC
+    `;
+
+    const byTypeQuery = `
+      SELECT
+        CallType,
+        COUNT(*) as callCount
+      FROM Logs
+      ${whereClause}
+      GROUP BY CallType
+      ORDER BY callCount DESC
+    `;
+
+    const summary = await dbGet(db, summaryQuery, params);
+    const logs = await dbAll(db, logsQuery, params);
+    const nurseStats = await dbAll(db, nurseStatsQuery, params);
+    const byRoom = await dbAll(db, byRoomQuery, params);
+    const byType = await dbAll(db, byTypeQuery, params);
+
+    res.json({
+      summary: {
+        totalCalls: summary?.totalCalls || 0,
+        emergencyCalls: summary?.emergencyCalls || 0,
+        normalCalls: summary?.normalCalls || 0,
+        completedCalls: summary?.completedCalls || 0,
+        pendingCalls: summary?.pendingCalls || 0,
+        avgResponseSeconds: summary?.avgResponseSeconds || 0
+      },
+      logs: logs || [],
+      nurseStats: nurseStats || [],
+      charts: {
+        byRoom: byRoom || [],
+        byType: byType || []
+      }
+    });
+  } catch (error) {
+    console.error('Error in /api/reports:', error);
+    res.status(500).json({ error: 'Failed to fetch report data' });
+  } finally {
+    if (db) db.close();
   }
 });
 
