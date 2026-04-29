@@ -569,23 +569,45 @@ const Reports = () => {
   /* Filtered logs for display */
   const filteredLogs = useMemo(() => {
     return reportData.logs.filter((log) => {
+      if (selectedNurse && log.NurseName !== selectedNurse) return false;
       if (filterRoom !== 'all' && String(log.RoomId) !== filterRoom) return false;
       if (filterCallType !== 'all' && log.CallType !== filterCallType) return false;
       return true;
     });
-  }, [reportData.logs, filterRoom, filterCallType]);
+  }, [reportData.logs, filterRoom, filterCallType, selectedNurse]);
 
   /* Unique rooms + nurses for dropdowns */
   const roomOptions = useMemo(() => [...new Set(reportData.logs.map((l) => String(l.RoomId)))].sort(), [reportData.logs]);
-  const nurseOptions = useMemo(() => [...new Set(reportData.logs.map((l) => l.NurseName).filter(Boolean))].sort(), [reportData.logs]);
+  const nurseOptions = useMemo(() => [...new Set(reportData.nurseStats.map((r) => r.NurseName).filter(Boolean))].sort(), [reportData.nurseStats]);
+
+  const filteredNurseStats = useMemo(() => {
+    if (!selectedNurse) return reportData.nurseStats;
+    return reportData.nurseStats.filter((row) => row.NurseName === selectedNurse);
+  }, [reportData.nurseStats, selectedNurse]);
+
+  const visibleSummary = useMemo(() => {
+    const totalCalls = filteredLogs.length;
+    const emergencyCalls = filteredLogs.filter((l) => l.CallType === 'Emergency').length;
+    const normalCalls = filteredLogs.filter((l) => l.CallType !== 'Emergency').length;
+    const completedCalls = filteredLogs.filter((l) => l.Status === 'Completed').length;
+    const pendingCalls = filteredLogs.filter((l) => l.Status !== 'Completed').length;
+    const responseValues = filteredLogs
+      .map((l) => Number(l.ResponseSeconds))
+      .filter((v) => !Number.isNaN(v) && v >= 0);
+    const avgResponseSeconds = responseValues.length
+      ? Math.round(responseValues.reduce((sum, value) => sum + value, 0) / responseValues.length)
+      : 0;
+
+    return { totalCalls, emergencyCalls, normalCalls, completedCalls, pendingCalls, avgResponseSeconds };
+  }, [filteredLogs]);
 
   /* completion rate */
-  const completionRate = reportData.summary.totalCalls
-    ? ((reportData.summary.completedCalls / reportData.summary.totalCalls) * 100).toFixed(1)
+  const completionRate = visibleSummary.totalCalls
+    ? ((visibleSummary.completedCalls / visibleSummary.totalCalls) * 100).toFixed(1)
     : 0;
 
   /* ── Chart data ── */
-  const trendData = useMemo(() => buildTrendData(reportData.logs), [reportData.logs]);
+  const trendData = useMemo(() => buildTrendData(filteredLogs), [filteredLogs]);
 
   const trendChartData = {
     labels: trendData.labels,
@@ -621,19 +643,22 @@ const Reports = () => {
   };
 
   const roomChartData = {
-    labels: reportData.charts.byRoom.map((item) => `Phòng ${item.RoomId}`),
+    labels: [...new Set(filteredLogs.map((item) => item.RoomId))].sort((a, b) => a - b).map((roomId) => `Phòng ${roomId}`),
     datasets: [{
       label: 'Số cuộc gọi',
-      data: reportData.charts.byRoom.map((item) => item.callCount),
+      data: [...new Set(filteredLogs.map((item) => item.RoomId))].sort((a, b) => a - b).map((roomId) => filteredLogs.filter((log) => String(log.RoomId) === String(roomId)).length),
       backgroundColor: '#2563eb',
       borderRadius: 6
     }]
   };
 
   const typeChartData = {
-    labels: reportData.charts.byType.map((item) => item.CallType === 'Emergency' ? 'Khẩn cấp' : 'Thường'),
+    labels: ['Khẩn cấp', 'Thường'],
     datasets: [{
-      data: reportData.charts.byType.map((item) => item.callCount),
+      data: [
+        filteredLogs.filter((log) => log.CallType === 'Emergency').length,
+        filteredLogs.filter((log) => log.CallType !== 'Emergency').length
+      ],
       backgroundColor: ['#dc2626', '#16a34a'],
       borderWidth: 2,
       borderColor: '#fff'
@@ -641,21 +666,21 @@ const Reports = () => {
   };
 
   const nurseChartData = {
-    labels: reportData.nurseStats.map((r) => r.NurseName),
+    labels: filteredNurseStats.map((r) => r.NurseName),
     datasets: [{
       label: 'Số cuộc gọi',
-      data: reportData.nurseStats.map((r) => r.totalCalls),
+      data: filteredNurseStats.map((r) => r.totalCalls),
       backgroundColor: '#0891b2',
       borderRadius: 6
     }]
   };
 
   const responseTimeByRoomData = {
-    labels: reportData.charts.byRoom.map((item) => `Phòng ${item.RoomId}`),
+    labels: [...new Set(filteredLogs.map((item) => item.RoomId))].sort((a, b) => a - b).map((roomId) => `Phòng ${roomId}`),
     datasets: [{
       label: 'TG phản hồi TB (giây)',
-      data: reportData.charts.byRoom.map((item) => {
-        const logs = reportData.logs.filter((l) => String(l.RoomId) === String(item.RoomId) && l.ResponseSeconds != null);
+      data: [...new Set(filteredLogs.map((item) => item.RoomId))].sort((a, b) => a - b).map((roomId) => {
+        const logs = filteredLogs.filter((l) => String(l.RoomId) === String(roomId) && l.ResponseSeconds != null);
         if (!logs.length) return 0;
         return Math.round(logs.reduce((a, l) => a + Number(l.ResponseSeconds), 0) / logs.length);
       }),
@@ -723,6 +748,17 @@ const Reports = () => {
               </div>
             )}
 
+            <select
+              value={selectedNurse}
+              onChange={(e) => setSelectedNurse(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            >
+              <option value="">Tất cả nhân viên</option>
+              {nurseOptions.map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+
             <button
               onClick={fetchReport}
               disabled={loading}
@@ -783,12 +819,12 @@ const Reports = () => {
       {/* ── Summary cards ── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
         {[
-          { label: 'Tổng cuộc gọi', value: reportData.summary.totalCalls, color: 'blue' },
-          { label: 'Khẩn cấp', value: reportData.summary.emergencyCalls, color: 'red' },
-          { label: 'Thường', value: reportData.summary.normalCalls, color: 'green' },
-          { label: 'Đã xử lý', value: reportData.summary.completedCalls, color: 'teal' },
-          { label: 'Chưa xử lý', value: reportData.summary.pendingCalls, color: 'yellow' },
-          { label: 'TG phản hồi TB', value: formatSeconds(reportData.summary.avgResponseSeconds), color: 'purple' },
+          { label: 'Tổng cuộc gọi', value: visibleSummary.totalCalls, color: 'blue' },
+          { label: 'Khẩn cấp', value: visibleSummary.emergencyCalls, color: 'red' },
+          { label: 'Thường', value: visibleSummary.normalCalls, color: 'green' },
+          { label: 'Đã xử lý', value: visibleSummary.completedCalls, color: 'teal' },
+          { label: 'Chưa xử lý', value: visibleSummary.pendingCalls, color: 'yellow' },
+          { label: 'TG phản hồi TB', value: formatSeconds(visibleSummary.avgResponseSeconds), color: 'purple' },
           { label: 'Tỷ lệ hoàn thành', value: `${completionRate}%`, color: 'indigo' }
         ].map(({ label, value, color }) => {
           const colors = {
@@ -839,7 +875,7 @@ const Reports = () => {
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="text-base font-semibold text-gray-800 mb-4">Hiệu suất nhân viên (số cuộc gọi)</h3>
-          {reportData.nurseStats.length === 0
+          {filteredNurseStats.length === 0
             ? <p className="text-sm text-gray-400">Chưa có dữ liệu.</p>
             : <Bar data={nurseChartData} options={barOpts} />}
         </div>
@@ -858,9 +894,9 @@ const Reports = () => {
               </tr>
             </thead>
             <tbody>
-              {reportData.nurseStats.length === 0 ? (
+              {filteredNurseStats.length === 0 ? (
                 <tr><td colSpan={3} className="px-4 py-4 text-gray-400 text-center">Chưa có dữ liệu.</td></tr>
-              ) : reportData.nurseStats.map((row) => (
+              ) : filteredNurseStats.map((row) => (
                 <tr key={row.NurseName} className="border-t hover:bg-gray-50 transition">
                   <td className="px-4 py-3 font-medium text-gray-800">{row.NurseName}</td>
                   <td className="px-4 py-3 text-right text-gray-700">{row.totalCalls}</td>
