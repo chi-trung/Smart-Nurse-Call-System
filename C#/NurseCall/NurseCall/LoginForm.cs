@@ -4,137 +4,176 @@ using System.Windows.Forms;
 
 namespace NurseCall
 {
-    public partial class LoginForm : Form
+    public class LoginForm : Form
     {
-        public static int LoggedInUserId { get; set; } = -1;
-        public static string LoggedInUserName { get; set; } = "";
-        public static string LoggedInFullName { get; set; } = "";
-        public bool LoginSuccess { get; set; } = false;
+        public static int LoggedInUserId { get; private set; } = -1;
+        public static string LoggedInUserName { get; private set; } = string.Empty;
+        public static string LoggedInFullName { get; private set; } = string.Empty;
+
+        public bool LoginSuccess { get; private set; }
+
+        private TextBox txtUsername;
+        private TextBox txtPassword;
+        private Label lblHint;
 
         public LoginForm()
         {
-            InitializeComponent();
-            SetupUI();
+            BuildUI();
         }
 
-        private void SetupUI()
+        private void BuildUI()
         {
-            this.Text = "Đăng Nhập - Smart Nurse Call";
-            this.Size = new Size(450, 250);
-            this.StartPosition = FormStartPosition.CenterScreen;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
+            Text = "Dang nhap y ta";
+            ClientSize = new Size(460, 300);
+            StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            BackColor = Color.FromArgb(238, 242, 248);
+            Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
 
-            // Panel chính
-            Panel mainPanel = new Panel();
-            mainPanel.BackColor = Color.FromArgb(52, 152, 219);
-            mainPanel.Dock = DockStyle.Fill;
-            this.Controls.Add(mainPanel);
-
-            // Label tiêu đề
-            Label lblTitle = new Label();
-            lblTitle.Text = "Smart Nurse Call System";
-            lblTitle.Font = new Font("Arial", 16, FontStyle.Bold);
-            lblTitle.ForeColor = Color.White;
-            lblTitle.Bounds = new Rectangle(10, 15, 400, 30);
-            mainPanel.Controls.Add(lblTitle);
-
-            // Label username
-            Label lblUsername = new Label();
-            lblUsername.Text = "Tên đăng nhập:";
-            lblUsername.ForeColor = Color.White;
-            lblUsername.Font = new Font("Arial", 10);
-            lblUsername.Bounds = new Rectangle(20, 65, 100, 25);
-            mainPanel.Controls.Add(lblUsername);
-
-            // Textbox username
-            TextBox txtUsername = new TextBox();
-            txtUsername.Name = "txtUsername";
-            txtUsername.Font = new Font("Arial", 11);
-            txtUsername.Bounds = new Rectangle(130, 65, 280, 30);
-            mainPanel.Controls.Add(txtUsername);
-
-            // Label password
-            Label lblPassword = new Label();
-            lblPassword.Text = "Mật khẩu:";
-            lblPassword.ForeColor = Color.White;
-            lblPassword.Font = new Font("Arial", 10);
-            lblPassword.Bounds = new Rectangle(20, 110, 100, 25);
-            mainPanel.Controls.Add(lblPassword);
-
-            // Textbox password
-            TextBox txtPassword = new TextBox();
-            txtPassword.Name = "txtPassword";
-            txtPassword.Font = new Font("Arial", 11);
-            txtPassword.PasswordChar = '*';
-            txtPassword.Bounds = new Rectangle(130, 110, 280, 30);
-            mainPanel.Controls.Add(txtPassword);
-
-            // Button đăng nhập
-            Button btnLogin = new Button();
-            btnLogin.Text = "ĐĂNG NHẬP";
-            btnLogin.Font = new Font("Arial", 11, FontStyle.Bold);
-            btnLogin.BackColor = Color.FromArgb(46, 204, 113);
-            btnLogin.ForeColor = Color.White;
-            btnLogin.FlatStyle = FlatStyle.Flat;
-            btnLogin.Bounds = new Rectangle(130, 165, 130, 40);
-            btnLogin.Click += (sender, e) => BtnLogin_Click(sender, e, txtUsername, txtPassword);
-            mainPanel.Controls.Add(btnLogin);
-
-            // Button hủy
-            Button btnCancel = new Button();
-            btnCancel.Text = "HỦY";
-            btnCancel.Font = new Font("Arial", 11, FontStyle.Bold);
-            btnCancel.BackColor = Color.FromArgb(231, 76, 60);
-            btnCancel.ForeColor = Color.White;
-            btnCancel.FlatStyle = FlatStyle.Flat;
-            btnCancel.Bounds = new Rectangle(270, 165, 130, 40);
-            btnCancel.Click += (sender, e) => this.Close();
-            mainPanel.Controls.Add(btnCancel);
-
-            // Cho phép Enter để đăng nhập
-            txtUsername.KeyDown += (sender, e) => 
+            Panel card = new Panel
             {
-                if (e.KeyCode == Keys.Enter) BtnLogin_Click(btnLogin, e, txtUsername, txtPassword);
+                Width = 410,
+                Height = 245,
+                Left = 25,
+                Top = 25,
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle
             };
-            txtPassword.KeyDown += (sender, e) => 
+
+            Label lblTitle = new Label
             {
-                if (e.KeyCode == Keys.Enter) BtnLogin_Click(btnLogin, e, txtUsername, txtPassword);
+                Left = 20,
+                Top = 18,
+                Width = 360,
+                Text = "NURSE LOGIN",
+                Font = new Font("Segoe UI Semibold", 16F, FontStyle.Bold, GraphicsUnit.Point),
+                ForeColor = Color.FromArgb(28, 79, 140)
             };
+
+            Label lblSub = new Label
+            {
+                Left = 20,
+                Top = 52,
+                Width = 360,
+                Text = "Dang nhap truoc khi vao man hinh dieu phoi.",
+                ForeColor = Color.FromArgb(96, 106, 122)
+            };
+
+            Label lblUser = new Label { Left = 20, Top = 88, Width = 100, Text = "Tai khoan" };
+            txtUsername = new TextBox
+            {
+                Left = 20,
+                Top = 108,
+                Width = 365,
+                Height = 30,
+                Font = new Font("Segoe UI", 11F, FontStyle.Regular, GraphicsUnit.Point)
+            };
+
+            Label lblPass = new Label { Left = 20, Top = 145, Width = 100, Text = "Mat khau" };
+            txtPassword = new TextBox
+            {
+                Left = 20,
+                Top = 165,
+                Width = 365,
+                Height = 30,
+                PasswordChar = '*',
+                Font = new Font("Segoe UI", 11F, FontStyle.Regular, GraphicsUnit.Point)
+            };
+
+            Button btnLogin = new Button
+            {
+                Left = 20,
+                Top = 205,
+                Width = 175,
+                Height = 34,
+                Text = "Dang nhap",
+                BackColor = Color.FromArgb(33, 150, 243),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            btnLogin.FlatAppearance.BorderSize = 0;
+            btnLogin.Click += BtnLogin_Click;
+
+            Button btnCancel = new Button
+            {
+                Left = 210,
+                Top = 205,
+                Width = 175,
+                Height = 34,
+                Text = "Thoat",
+                BackColor = Color.FromArgb(236, 239, 241),
+                ForeColor = Color.FromArgb(55, 71, 79),
+                FlatStyle = FlatStyle.Flat
+            };
+            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(189, 198, 207);
+            btnCancel.Click += (s, e) => Close();
+
+            lblHint = new Label
+            {
+                Left = 20,
+                Top = 248,
+                Width = 365,
+                Height = 20,
+                ForeColor = Color.FromArgb(113, 128, 150),
+                Text = "Mac dinh: nurse1 / 123456"
+            };
+
+            txtUsername.KeyDown += Input_KeyDown;
+            txtPassword.KeyDown += Input_KeyDown;
+
+            card.Controls.Add(lblTitle);
+            card.Controls.Add(lblSub);
+            card.Controls.Add(lblUser);
+            card.Controls.Add(txtUsername);
+            card.Controls.Add(lblPass);
+            card.Controls.Add(txtPassword);
+            card.Controls.Add(btnLogin);
+            card.Controls.Add(btnCancel);
+            Controls.Add(card);
+            Controls.Add(lblHint);
+
+            AcceptButton = btnLogin;
+            CancelButton = btnCancel;
+            Shown += (s, e) => txtUsername.Focus();
         }
 
-        private void BtnLogin_Click(object sender, EventArgs e, TextBox txtUsername, TextBox txtPassword)
+        private void Input_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                BtnLogin_Click(this, EventArgs.Empty);
+            }
+        }
+
+        private void BtnLogin_Click(object sender, EventArgs e)
         {
             string username = txtUsername.Text.Trim();
             string password = txtPassword.Text.Trim();
 
-            if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             {
-                MessageBox.Show("Vui lòng nhập tên đăng nhập và mật khẩu!", "Cảnh báo", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Vui long nhap tai khoan va mat khau.", "Canh bao", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            // Gọi hàm đăng nhập từ DatabaseHelper
             var (success, userId, fullName) = DatabaseHelper.LoginUser(username, password);
 
-            if (success)
+            if (!success)
             {
-                LoggedInUserId = userId;
-                LoggedInUserName = username;
-                LoggedInFullName = fullName;
-                LoginSuccess = true;
-                
-                MessageBox.Show($"Chào mừng {fullName}!", "Đăng nhập thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                this.DialogResult = DialogResult.OK;
-                this.Close();
-            }
-            else
-            {
-                MessageBox.Show("Tên đăng nhập hoặc mật khẩu không chính xác!", "Lỗi đăng nhập", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Tai khoan hoac mat khau khong dung.", "Dang nhap that bai", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 txtPassword.Clear();
                 txtPassword.Focus();
+                return;
             }
+
+            LoggedInUserId = userId;
+            LoggedInUserName = username;
+            LoggedInFullName = string.IsNullOrWhiteSpace(fullName) ? username : fullName;
+            LoginSuccess = true;
+            DialogResult = DialogResult.OK;
+            Close();
         }
     }
 }

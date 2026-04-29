@@ -16,7 +16,25 @@ namespace NurseCall
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new Form1());
+
+            try
+            {
+                DatabaseHelper.InitializeDatabase();
+                DatabaseHelper.EnsureDefaultNurseUser();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Khong the khoi tao he thong: " + ex.Message, "Loi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            using (LoginForm loginForm = new LoginForm())
+            {
+                if (loginForm.ShowDialog() == DialogResult.OK && loginForm.LoginSuccess)
+                {
+                    Application.Run(new Form1(LoginForm.LoggedInFullName));
+                }
+            }
         }
     }
 }

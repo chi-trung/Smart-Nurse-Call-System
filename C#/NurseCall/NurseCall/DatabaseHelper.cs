@@ -15,7 +15,7 @@ public class DatabaseHelper
         using (var conn = new SQLiteConnection(connectionString))
         {
             conn.Open();
-            
+             
             // Tạo table Logs (đã có, thêm cột NurseName)
             string logsSql = @"CREATE TABLE IF NOT EXISTS Logs (
                         Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,9 +23,13 @@ public class DatabaseHelper
                         CallType TEXT,
                         RequestTime DATETIME,
                         ResponseTime DATETIME,
-                        Status TEXT,
+                        Status TEXT DEFAULT 'Pending',
                         NurseName TEXT DEFAULT 'Unknown',
-                        CompletedBy TEXT DEFAULT NULL
+                        CompletedBy TEXT DEFAULT NULL,
+                        AcceptedTime DATETIME,
+                        StartProcessTime DATETIME,
+                        CancelReason TEXT,
+                        CancelledTime DATETIME
                       )";
             using (SQLiteCommand cmd = new SQLiteCommand(logsSql, conn))
             {
@@ -160,6 +164,26 @@ public class DatabaseHelper
         return (false, -1, "");
     }
 
+    // Tạo tài khoản mặc định nếu hệ thống chưa có user nào
+    public static void EnsureDefaultNurseUser()
+    {
+        using (var conn = new SQLiteConnection(connectionString))
+        {
+            conn.Open();
+            string countSql = "SELECT COUNT(1) FROM Users";
+            using (SQLiteCommand cmd = new SQLiteCommand(countSql, conn))
+            {
+                long userCount = (long)cmd.ExecuteScalar();
+                if (userCount == 0)
+                {
+                    // Gọi CreateUser để đồng bộ với logic hash + NurseStats.
+                    CreateUser("nurse1", "123456", "Nurse Default");
+                }
+            }
+            conn.Close();
+        }
+    }
+
     // Hàm lấy ID user từ username
     public static int GetUserId(string username)
     {
@@ -224,15 +248,84 @@ public class DatabaseHelper
         {
             conn.Open();
             string sql = @"UPDATE Logs SET ResponseTime = @resTime, Status = 'Completed', 
-                          NurseName = @nurseName, CompletedBy = @nurseName
+                          NurseName = @nurseName, CompletedBy = @nurseName, StartProcessTime = @startTime
                           WHERE Id = @logId";
             SQLiteCommand cmd = new SQLiteCommand(sql, conn);
             cmd.Parameters.AddWithValue("@resTime", DateTime.Now);
+            cmd.Parameters.AddWithValue("@startTime", DateTime.Now);
             cmd.Parameters.AddWithValue("@logId", logId);
             cmd.Parameters.AddWithValue("@nurseName", nurseName);
             cmd.ExecuteNonQuery();
             conn.Close();
         }
+    }
+
+    // ============= NEW METHODS FOR CALL DETAIL POPUP =============
+
+    // Hàm accept call (khi nurse nhấn accept trong popup)
+    public static void AcceptCall(long logId)
+    {
+        using (var conn = new SQLiteConnection(connectionString))
+        {
+            conn.Open();
+            string sql = @"UPDATE Logs SET AcceptedTime = @acceptTime, Status = 'Accepted' 
+                          WHERE Id = @logId";
+            SQLiteCommand cmd = new SQLiteCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@acceptTime", DateTime.Now);
+            cmd.Parameters.AddWithValue("@logId", logId);
+            cmd.ExecuteNonQuery();
+            conn.Close();
+        }
+    }
+
+    // Hàm hủy call (khi nurse nhấn cancel trong popup)
+    public static void CancelCall(long logId, string cancelReason)
+    {
+        using (var conn = new SQLiteConnection(connectionString))
+        {
+            conn.Open();
+            string sql = @"UPDATE Logs SET Status = 'Cancelled', CancelledTime = @cancelTime, 
+                          CancelReason = @reason
+                          WHERE Id = @logId";
+            SQLiteCommand cmd = new SQLiteCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@cancelTime", DateTime.Now);
+            cmd.Parameters.AddWithValue("@reason", cancelReason ?? "");
+            cmd.Parameters.AddWithValue("@logId", logId);
+            cmd.ExecuteNonQuery();
+            conn.Close();
+        }
+    }
+
+    // Hàm lấy chi tiết call từ ID
+    public static (long id, int roomId, string callType, DateTime requestTime, string status, 
+                   string nurseName, DateTime? acceptedTime) GetCallDetails(long logId)
+    {
+        using (var conn = new SQLiteConnection(connectionString))
+        {
+            conn.Open();
+            string sql = @"SELECT Id, RoomId, CallType, RequestTime, Status, NurseName, AcceptedTime 
+                          FROM Logs WHERE Id = @logId";
+            using (SQLiteCommand cmd = new SQLiteCommand(sql, conn))
+            {
+                cmd.Parameters.AddWithValue("@logId", logId);
+                using (SQLiteDataReader reader = cmd.ExecuteReader())
+                {
+                    if (reader.Read())
+                    {
+                        long id = reader.GetInt64(0);
+                        int roomId = reader.GetInt32(1);
+                        string callType = reader.GetString(2);
+                        DateTime requestTime = reader.GetDateTime(3);
+                        string status = reader.GetString(4);
+                        string nurseName = reader.IsDBNull(5) ? "Unknown" : reader.GetString(5);
+                        DateTime? acceptedTime = reader.IsDBNull(6) ? (DateTime?)null : reader.GetDateTime(6);
+                        
+                        return (id, roomId, callType, requestTime, status, nurseName, acceptedTime);
+                    }
+                }
+            }
+        }
+        return (0, 0, "", DateTime.Now, "", "", null);
     }
 
     // Hàm helper
