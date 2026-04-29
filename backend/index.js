@@ -627,7 +627,12 @@ app.get('/api/nurses/:nurseId/stats', async (req, res) => {
         END AS CompletionRate,
         datetime('now') AS LastUpdate
       FROM Users u
-      LEFT JOIN Logs l ON (l.NurseName = u.FullName OR l.CompletedBy = u.FullName)
+      LEFT JOIN Logs l ON (
+        TRIM(COALESCE(l.NurseName, '')) = TRIM(u.FullName)
+        OR TRIM(COALESCE(l.CompletedBy, '')) = TRIM(u.FullName)
+        OR TRIM(COALESCE(l.NurseName, '')) = TRIM(u.Username)
+        OR TRIM(COALESCE(l.CompletedBy, '')) = TRIM(u.Username)
+      )
       WHERE u.Id = ?
       GROUP BY u.Id, u.FullName, u.Username`,
       [nurseId],
@@ -671,7 +676,12 @@ app.get('/api/nurses/stats/all', async (req, res) => {
           ELSE ROUND((SUM(CASE WHEN l.Status = 'Completed' THEN 1 ELSE 0 END) * 100.0 / COUNT(l.Id)), 2)
         END AS CompletionRate
       FROM Users u
-      LEFT JOIN Logs l ON (l.NurseName = u.FullName OR l.CompletedBy = u.FullName)
+      LEFT JOIN Logs l ON (
+        TRIM(COALESCE(l.NurseName, '')) = TRIM(u.FullName)
+        OR TRIM(COALESCE(l.CompletedBy, '')) = TRIM(u.FullName)
+        OR TRIM(COALESCE(l.NurseName, '')) = TRIM(u.Username)
+        OR TRIM(COALESCE(l.CompletedBy, '')) = TRIM(u.Username)
+      )
       WHERE u.IsActive = 1
       GROUP BY u.Id, u.FullName
       ORDER BY CompletedCalls DESC`,
