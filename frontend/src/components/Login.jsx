@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogIn, AlertCircle } from 'lucide-react';
+import { LogIn, AlertCircle, Phone } from 'lucide-react';
 import { authService } from '../services/api';
 
 export const Login = ({ onLoginSuccess }) => {
