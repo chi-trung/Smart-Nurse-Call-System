@@ -780,8 +780,9 @@ bd6fe8e feat: Implement Node.js/Express backend with authentication
 - [x] WebSocket real-time broadcasting
 - [x] Error handling & logging
 - [x] User management APIs working
-- [x] Nurse stats APIs working
-- [x] All call-completion APIs working
+- [x] Nurse stats APIs working with fixed join logic (by FullName/Username)
+- [x] All call-completion APIs working with nurseName propagation
+- [x] Nurse filtering in reports API
 
 ### Frontend
 - [x] React components rendering correctly
@@ -792,21 +793,28 @@ bd6fe8e feat: Implement Node.js/Express backend with authentication
 - [x] Vibration support
 - [x] Vietnamese UI 100%
 - [x] Responsive design (desktop/mobile)
+- [x] Nurse filtering dropdown in reports & stats pages
+- [x] Real-time chart updates when nurse filter changes
 
 ### C# GUI
 - [x] Serial port communication (9600 baud)
 - [x] Database initialization & operations
 - [x] API integration with fallback
 - [x] DataGridView queue display
-- [x] LoginForm authentication flow
+- [x] LoginForm authentication flow (mandatory before Form1)
 - [x] Nurse name display + logout flow
 - [x] Vietnamese UI
 - [x] Color-coded logging
+- [x] Waiting time display with color coding (green <2min, orange 2-5min, red >5min)
+- [x] Call detail popup modal with confirm/cancel buttons
+- [x] Cancel reason text field + database storage
+- [x] Sends nurseName to backend /api/calls/complete-with-nurse endpoint
+- [x] Proper serial DONE command when cancel is confirmed
 
 ### Arduino
 - [x] Pin configuration correct
-- [x] Button debouncing (300ms)
-- [x] LED control logic
+- [x] Button debouncing (300ms) - prevents multiple triggers per press
+- [x] LED control logic - only turns off LED matching call type, not both
 - [x] Serial protocol (REQ/DONE)
 - [x] Buzzer control
 - [x] Multi-room support (4 rooms)
@@ -834,6 +842,85 @@ bd6fe8e feat: Implement Node.js/Express backend with authentication
    - Horizontal scaling (multiple backend instances)
    - Load balancing (nginx)
    - Caching layer (Redis)
+
+---
+
+## 🆕 RECENT ENHANCEMENTS (April 29, 2026)
+
+### 1. **Nurse Login Gate** (LoginForm.cs)
+- Bắt buộc y tá phải đăng nhập trước khi vào Form1
+- Tự động seed tài khoản mặc định (nurse1 / 123456) nếu DB trống
+- Hiển thị tên y tá đã login ở title bar + nút Logout
+- Static properties: LoggedInFullName, LoggedInUserName
+
+### 2. **Waiting Time Display** (Form1.cs)
+- Hiển thị thời gian chờ của mỗi call trong cột "WaitingTime"
+- Color coding tự động:
+  - 🟢 **Xanh**: < 2 phút (thường)
+  - 🟠 **Cam**: 2-5 phút (cảnh báo)
+  - 🔴 **Đỏ**: > 5 phút (ưu tiên cao)
+- Timer update mỗi giây
+- Tính toán dựa vào callId (không phụ thuộc row index)
+
+### 3. **Call Detail Popup** (CallDetailForm.cs)
+- Modal popup hiển thị:
+  - Phòng bệnh (RoomId)
+  - Loại cuộc gọi (Normal/Emergency)
+  - Thời gian chờ hiện tại
+  - Tên y tá đang login
+- Hai nút: "XÁC NHẬN" và "HỦY"
+- Nếu hủy: popup cho nhập lý do vào text field
+
+### 4. **Cancel Reason Storage** (DatabaseHelper.cs)
+- Thêm cột vào bảng Logs:
+  - `CancelReason` - Lý do hủy cuộc gọi
+  - `CancelledTime` - Thời gian hủy
+  - `Status` = 'Cancelled' khi hủy
+- Khi hủy call: gửi DONE command đến Arduino, lưu reason vào DB
+
+### 5. **Nurse Stats Fix** (backend/index.js)
+- **Vấn đề cũ**: Backend join Logs.NurseName với Users chỉ qua direct match, nhưng C# không gửi nurseName → toàn 0
+- **Giải pháp**: 
+  - C# giờ gửi `nurseName` qua endpoint `/api/calls/complete-with-nurse`
+  - Backend join logic chọn FullName hoặc Username (2 cách match)
+  - Nhân viên thống kê được lấy chính xác từ Logs.NurseName
+- **Endpoints được fix**:
+  - `GET /api/nurses/stats/all` - Tổng hợp stats tất cả y tá
+  - `GET /api/nurses/:nurseId/logs` - Lịch sử của từng y tá
+  - `POST /api/calls/complete-with-nurse` - Nhận nurseName + lưu vào Logs
+
+### 6. **Nurse Filtering in Reports** (frontend/Reports.jsx)
+- Thêm dropdown "Chọn Nhân viên" ở section Export
+- Khi chọn một y tá:
+  - Tất cả cards (Total, Emergency, Completed, Rate) được tính lại chỉ cho nurse đó
+  - Các chart (Trend, by Room, Distribution, Response Time) cập nhật real-time
+  - Bảng Nurse Stats hiển thị chỉ nurse đã chọn
+  - Detail logs filter để chỉ show calls từ nurse này
+- Chọn "Tất cả" để xem toàn bộ
+
+### 7. **Arduino LED Fix** (sketch_apr28a.ino)
+- **Vấn đề cũ**: Khi nhận "DONE:1:N" từ GUI, code tắt cả 2 LED của room (cả Normal + Emergency)
+- **Giải pháp**: 
+  - Parse call type từ command: `type == 'N'` → chỉ tắt Normal LED
+  - Parse call type từ command: `type == 'E'` → chỉ tắt Emergency LED
+  - Không còn tắt sai LED
+- **Button Debouncing Improved**:
+  - 300ms delay prevent multiple triggers từ 1 lần nhấn
+  - Chỉ send "REQ" một lần per physical press
+
+### 8. **C# API Contract Update** (Form1.cs)
+- **Trước**: Endpoint là `/api/calls/complete` không có nurseName
+- **Giờ**: Endpoint là `/api/calls/complete-with-nurse` với payload:
+  ```json
+  {
+    "roomId": "1",
+    "callType": "Emergency",
+    "nurseName": "Nguyễn Văn A",
+    "nurseId": 1
+  }
+  ```
+- Payload được tạo từ `loggedInNurseName` (từ LoginForm)
+- Backend nhận → lưu vào Logs.NurseName + Logs.CompletedBy
 
 ---
 

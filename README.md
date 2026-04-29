@@ -22,6 +22,10 @@ IoT-based nurse call system với real-time monitoring dashboard, automatic aler
 - ✅ **Nurse Login/Logout** - Y tá đăng nhập trước khi thao tác trên GUI  
 - ✅ **Nurse Management** - Admin tạo/xóa tài khoản y tá trên web  
 - ✅ **Nurse Performance Stats** - Thống kê theo từng y tá và lịch sử xử lý  
+- ✅ **Waiting Time Display** - Hiển thị thời gian chờ với color coding (xanh <2min, cam 2-5min, đỏ >5min)
+- ✅ **Call Detail Popup** - Popup chi tiết cuộc gọi với nút xác nhận/hủy
+- ✅ **Cancel Reason** - Lưu lý do hủy cuộc gọi vào database
+- ✅ **Nurse Filtering in Reports** - Lọc báo cáo và thống kê theo từng y tá
 - ✅ **Fallback Mode** - GUI vẫn hoạt động nếu backend down  
 - ✅ **Vietnamese UI** - Giao diện tiếng Việt hoàn toàn  
 - ✅ **Responsive Design** - Desktop, tablet & mobile  
