@@ -350,7 +350,7 @@ export const Dashboard = ({ onLogout }) => {
 
       {/* Footer */}
       <footer className="bg-gray-800 text-gray-300 text-center py-4 mt-12">
-        <p>© 2024 Hệ thống Gọi Y tá IoT. Dữ liệu cập nhật real-time mỗi {REFRESH_INTERVAL / 1000} giây.</p>
+        <p>© 2026 IoT Nurse Call System | Kết nối real-time • Cập nhật tức thời</p>
       </footer>
     </div>
   );
