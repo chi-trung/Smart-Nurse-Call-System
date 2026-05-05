@@ -1,7 +1,8 @@
 # Smart Nurse Call System - Tóm tắt Triển khai Chi tiết
 
 **Ngày tạo:** April 28, 2026  
-**Phiên bản:** 1.0.0  
+**Cập nhật lần cuối:** May 5, 2026  
+**Phiên bản:** 1.1.0  
 **Trạng thái:** Hoàn thành & deployed to GitHub  
 **Repository:** https://github.com/chi-trung/Smart-Nurse-Call-System
 
@@ -144,6 +145,13 @@ CREATE TABLE Logs (
 - `CompletedBy` - Trường bổ sung để ghi nhận người hoàn thành
 
 **Vị trí file:** `C#/NurseCall/bin/Debug/nurse_call.db`
+
+### Logs Status Flow
+```
+Pending → Accepted → In Progress → Completed
+                                    ↓
+ Bất kỳ trạng thái nào  ────────→ Cancelled
+```
 
 ---
 
@@ -335,7 +343,40 @@ Response (200 OK):
 
 ### Call Management Endpoints (WRITE)
 
-#### 6. Complete Call (GUI → Backend)
+#### 6. Update Call Status (PATCH - endpoint chính cho C# GUI)
+```
+PATCH /api/calls/:id/status
+Content-Type: application/json
+
+Request Body:
+{
+  "status": "Accepted",   // Accepted | In Progress | Completed | Cancelled
+  "nurseName": "Nguyễn Văn A",
+  "nurseId": 1,
+  "roomId": 1,            // dùng cho context lookup nếu ID local khác backend
+  "callType": "Emergency",
+  "cancelReason": "Báo nhầm"  // bắt buộc khi status = Cancelled
+}
+
+Response (200 OK):
+{
+  "success": true,
+  "logId": 1,
+  "status": "Accepted",
+  "message": "Call #1 updated to Accepted"
+}
+
+Response (409 Conflict):
+{
+  "error": "Cannot change status from Completed to Accepted"
+}
+
+Trạng thái hợp lệ:
+  Pending → Accepted → In Progress → Completed
+  Bất kỳ → Cancelled (cần cancelReason)
+```
+
+#### 7. Complete Call (GUI → Backend - legacy fallback)
 ```
 POST /api/calls/complete
 Content-Type: application/json
@@ -517,11 +558,15 @@ NurseCall/
 - **Serial Port:** 9600 baud, configurable COM port
 - **Database:** Local SQLite (nurse_call.db)
 - **Authentication:** LoginForm trước khi vào main GUI
-- **API Integration:** HTTP POST to backend /api/calls/complete-with-nurse
+- **API Integration:** PATCH /api/calls/{id}/status cho workflow nhiều bước
+- **Async/Await:** Toàn bộ API call dùng async/await, không block UI
+- **Status Check:** Kiểm tra trạng thái trước mỗi action → không crash khi bấm sai thứ tự
 - **Fallback Mode:** Direct database update if API fails
 - **UI Language:** 100% Vietnamese
 - **Logging:** Color-coded log messages (✓ success, ✗ error)
 - **Queue Display:** Sortable DataGridView with action buttons
+- **CallDetailForm:** Popup hiển nút theo trạng thái (Pending/Accepted/In Progress)
+- **Quick-Complete:** Bấm xác nhận từ Pending tự chuyển Pending → Accepted → In Progress → Completed
 - **Logout Flow:** Đăng xuất và quay lại LoginForm
 
 ---
@@ -924,6 +969,65 @@ bd6fe8e feat: Implement Node.js/Express backend with authentication
 
 ---
 
+## 🆕 WORKFLOW FIX & ANTI-CRASH UPDATE (May 5, 2026)
+
+### 9. **Workflow Crash/Đơ Fix** (Form1.cs + CallDetailForm.cs)
+
+**Vấn đề cũ:**
+- Luồng cũ có thể gọi hoàn tất trực tiếp khi trạng thái chưa hợp lệ → crash
+- Có chỗ dùng `.Wait()` trên UI thread → đơ (freeze) khi gọi API backend chậm/lỗi
+- Popup chưa ràng buộc nút theo trạng thái hiện tại → người dùng bấm sai thứ tự
+
+**Giải pháp đã triển khai:**
+
+#### CallDetailForm.cs
+- Nhận `currentStatus` khi mở popup
+- Chỉ hiển thị nút theo đúng trạng thái:
+  - **Pending:** Nhận ca, Xác nhận xử lý, Hủy cuộc gọi
+  - **Accepted:** Bắt đầu xử lý, Hủy cuộc gọi
+  - **In Progress:** Xác nhận xử lý, Hủy cuộc gọi
+  - **Completed/Cancelled:** không hiện nút workflow nữa
+- Giữ UI ổn định khi mở form hủy và quay lại
+
+#### Form1.cs
+- Chuyển luồng xử lý sang `async/await` hoàn toàn → không block UI
+- Bổ sung `NormalizeStatus()` và kiểm tra trạng thái trước từng hành động
+- Quick-complete path: bấm "Xác nhận xử lý" từ Pending tự chuyển:
+  `Pending → Accepted → In Progress → Completed`
+- Bấm hoàn tất từ Accepted tự đẩy lên In Progress trước rồi Completed
+- Hủy cuộc gọi dùng chung API `PATCH /api/calls/:id/status` với status `Cancelled`
+- Loại bỏ hoàn toàn `.Wait()` và các cách gọi cũ dễ gây đơ/crash
+
+#### DatabaseHelper.cs
+- Thêm mới:
+  - `AcceptCall(logId)` - chuyển status Pending → Accepted
+  - `StartProcessing(logId, nurseName)` - chuyển Accepted → In Progress
+  - `CancelCall(logId, cancelReason)` - chuyển bất kỳ → Cancelled
+  - `GetCallDetails(logId)` - lấy chi tiết call từ DB
+  - `CompleteCallById(logId, nurseName)` - hoàn tất theo ID
+- Các cột mới được thêm:
+  - `AcceptedTime` - thời gian nhận ca
+  - `StartProcessTime` - thời gian bắt đầu xử lý
+  - `CancelReason` - lý do hủy
+  - `CancelledTime` - thời gian hủy
+
+#### Backend index.js
+- Thêm endpoint `PATCH /api/calls/:id/status`:
+  - Kiểm tra transition hợp lệ (statusRank + transitions map)
+  - No-op nếu trạng thái đã đạt hoặc vượt target
+  - Context fallback: nếu ID local không tìm thấy → tìm theo roomId+callType
+  - Broadcast `call-status-updated` + `log-update` qua WebSocket
+- Thêm endpoint `POST /api/calls/cancel-with-reason`
+- Thêm endpoint `GET /api/reports` với date filters + nurse stats
+- Cập nhật `initializeDatabase()` để auto-migrate cột mới
+
+**Kết quả:**
+- Bấm nhanh "Xác nhận xử lý" cho ca đơn giản vẫn chạy ổn, không crash
+- Workflow hiển thị theo thứ tự trạng thái nên người dùng khó bấm sai hơn
+- Dù bấm "tắt đường" thì logic vẫn tự chuyển bước hợp lệ
+
+---
+
 ## 📞 TROUBLESHOOTING QUICK REFERENCE
 
 | Vấn đề | Nguyên nhân | Giải pháp |
@@ -934,8 +1038,10 @@ bd6fe8e feat: Implement Node.js/Express backend with authentication
 | No audio alerts | Browser permissions | Click page first, check volume |
 | Database locked | Multiple access | Backend uses READ-ONLY for web |
 | JWT expired | Session timeout | Re-login (24h expiry) |
-| Nurse stats show 0 | Stats not recalculated yet | Restart backend and ensure calls use `/api/calls/complete-with-nurse` |
+| Nurse stats show 0 | Stats not recalculated yet | Restart backend and ensure calls use PATCH /api/calls/:id/status |
 | Response time negative | UTC/localtime mismatch in old rows | Backend now writes local time and clamps negative values |
+| GUI crash khi bấm nhanh | Workflow sai thứ tự | Đã fix: async/await + kiểm tra trạng thái trước mỗi action |
+| GUI đơ khi gọi API | .Wait() block UI thread | Đã fix: loại bỏ .Wait(), dùng async/await |
 
 ---
 
@@ -948,4 +1054,5 @@ bd6fe8e feat: Implement Node.js/Express backend with authentication
 
 ---
 
-**Dự án hoàn thành: April 28, 2026**
+**Dự án hoàn thành: April 28, 2026**  
+**Cập nhật lần cuối: May 5, 2026**

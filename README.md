@@ -23,13 +23,18 @@ IoT-based nurse call system với real-time monitoring dashboard, automatic aler
 - ✅ **Nurse Management** - Admin tạo/xóa tài khoản y tá trên web  
 - ✅ **Nurse Performance Stats** - Thống kê theo từng y tá và lịch sử xử lý  
 - ✅ **Waiting Time Display** - Hiển thị thời gian chờ với color coding (xanh <2min, cam 2-5min, đỏ >5min)
-- ✅ **Call Detail Popup** - Popup chi tiết cuộc gọi với nút xác nhận/hủy
+- ✅ **Call Detail Popup** - Popup chi tiết cuộc gọi với nút theo trạng thái hiện tại
+- ✅ **Multi-step Workflow** - Luồng xử lý nhiều bước: Pending → Accepted → In Progress → Completed
+- ✅ **Status-based Buttons** - Popup chỉ hiện nút hợp lệ theo trạng thái (tránh bấm sai thứ tự)
+- ✅ **Quick-Complete** - Bấm "Xác nhận xử lý" từ Pending sẽ tự chuyển chuỗi an toàn
+- ✅ **Async/Await Safe** - Toàn bộ luồng xử lý bất đồng bộ, không block UI
 - ✅ **Cancel Reason** - Lưu lý do hủy cuộc gọi vào database
 - ✅ **Nurse Filtering in Reports** - Lọc báo cáo và thống kê theo từng y tá
 - ✅ **Fallback Mode** - GUI vẫn hoạt động nếu backend down  
 - ✅ **Vietnamese UI** - Giao diện tiếng Việt hoàn toàn  
 - ✅ **Responsive Design** - Desktop, tablet & mobile  
 - ✅ **Response Time Fix** - Thời gian phản hồi dùng local time, không còn số âm  
+- ✅ **Anti-crash** - Kiểm tra trạng thái trước mỗi action, bấm sai thứ tự cũng không crash
 
 ---
 
@@ -96,10 +101,10 @@ Insert into database:
   CallType: Emergency
   Status: Pending
   RequestTime: 2026-04-28 13:24:19
-           ↓ (Send API Call)
+           ↓
 ```
 
-**Bước 3️⃣ - Y tá đăng nhập và xác nhận xử lý**
+**Bước 3️⃣ - Y tá đăng nhập và xem chi tiết**
 ```
 LoginForm xuất hiện trước Form1
            ↓
@@ -107,23 +112,38 @@ Y tá đăng nhập bằng tài khoản do admin tạo
            ↓
 Form1 hiển thị tên y tá đang login và nút Đăng xuất
            ↓
-Khi xử lý xong call, GUI gửi nurseName lên backend
+Y tá click "CHI TIẾT" trên cuộc gọi → mở CallDetailForm popup
 ```
 
-**Bước 4️⃣ - Backend xử lý & broadcast**
+**Bước 4️⃣ - Y tá thao tác qua popup (workflow nhiều bước)**
 ```
-Backend receives: POST /api/calls/complete-with-nurse
+CallDetailForm hiện nút theo trạng thái hiện tại:
+  • Pending:     [Nhận ca] [Xác nhận xử lý] [Hủy cuộc gọi]
+  • Accepted:    [Bắt đầu xử lý] [Hủy cuộc gọi]
+  • In Progress: [Xác nhận xử lý] [Hủy cuộc gọi]
+  • Completed/Cancelled: không hiện nút workflow
            ↓
-Update database: Status = "Completed"
-Save ResponseTime = local time
+Nếu bấm "Xác nhận xử lý" từ Pending → tự chạy chuỗi:
+  Pending → Accepted → In Progress → Completed (async/await)
+           ↓
+Mỗi bước gửi PATCH /api/calls/{id}/status lên backend
+```
+
+**Bước 5️⃣ - Backend xử lý & broadcast**
+```
+Backend receives: PATCH /api/calls/{id}/status
+           ↓
+Kiểm tra transition hợp lệ (status rank + allowed transitions)
+           ↓
+Update database: Status = target status
+Save timestamps (AcceptedTime, StartProcessTime, ResponseTime)
 Save NurseName / CompletedBy
            ↓ (WebSocket Event)
-Broadcast to all Web clients:
-  "emergency-alert" + "🔴 CẢNH BÁO KHẨN CẤP"
+Broadcast 'call-status-updated' + 'log-update' to all clients
            ↓
 ```
 
-**Bước 5️⃣ - Web Dashboard hiển thị**
+**Bước 6️⃣ - Web Dashboard hiển thị**
 ```
 React receives WebSocket event
            ↓
@@ -138,23 +158,11 @@ Admin sees red notification (Auto-dismiss in 8 seconds)
            ↓
 ```
 
-**Bước 6️⃣ - Y tá xử lý**
-```
-Nurse clicks "XÁC NHẬN XỰ LÝ" button
-           ↓
-WinForms sends: POST /api/calls/complete-with-nurse
-  { roomId: "1", callType: "Emergency", nurseName: "...", nurseId: 1 }
-           ↓ (Backend updates)
-Database: Status = "Completed"
-NurseStats / lịch sử xử lý được cập nhật
-           ↓ (Arduino receives)
-```
-
 **Bước 7️⃣ - Arduino nhận xác nhận**
 ```
-Arduino receives: "DONE:1:E"
+C# GUI gửi: "DONE:1:E" qua serial port
            ↓
-Turn OFF LED P1 (Red)
+Arduino turns OFF LED P1 (Red)
            ↓
 Send completion buzzer (1 beep)
            ↓
@@ -165,7 +173,20 @@ System ready for next call
 
 ## 📸 Demo & Screenshots
 
-### 1️⃣ C# WinForms GUI - Giao diện Y tá
+### 1️⃣ C# WinForms - Đăng nhập Y tá
+
+Y tá phải đăng nhập trước khi vào màn hình điều phối:
+
+![Nurse Login](assets/nurselogin.png)
+
+**Tính năng:**
+- Bắt buộc đăng nhập trước khi sử dụng
+- Tài khoản mặc định: `nurse1 / 123456`
+- Tự động seed user nếu DB trống
+
+---
+
+### 2️⃣ C# WinForms GUI - Giao diện Y tá
 
 Y tá kết nối Arduino qua COM port, nhận và xử lý cuộc gọi:
 
@@ -174,12 +195,26 @@ Y tá kết nối Arduino qua COM port, nhận và xử lý cuộc gọi:
 **Tính năng:**
 - Bảng hàng đợi hiển thị cuộc gọi chờ xử lý
 - Phân biệt khẩn cấp (hồng) vs thường (xanh)
-- Nút "XÁC NHẬN XỰ LÝ" để hoàn thành
+- Thời gian chờ với color coding (xanh < 2min, cam 2-5min, đỏ > 5min)
 - Nhật ký hệ thống chi tiết
 
 ---
 
-### 2️⃣ React Web Dashboard - Giao diện Quản trị
+### 3️⃣ C# WinForms - Popup Chi tiết Cuộc gọi
+
+Popup hiển thị chi tiết cuộc gọi với các nút thao tác theo trạng thái:
+
+![Call Detail Popup](assets/guidetail.png)
+
+**Tính năng:**
+- Hiển thị thông tin: Call ID, Phòng, Loại, Thời gian chờ
+- Nút theo trạng thái: Nhận ca → Bắt đầu xử lý → Xác nhận xử lý
+- Nút Hủy cuộc gọi với nhập lý do
+- Quick-complete: bấm "Xác nhận xử lý" tự chuyển toàn bộ workflow
+
+---
+
+### 4️⃣ React Web Dashboard - Bảng điều khiển
 
 Quản trị viên giám sát real-time từ web:
 
@@ -194,7 +229,47 @@ Quản trị viên giám sát real-time từ web:
 
 ---
 
-### 3️⃣ Proteus 8 Circuit Design - Sơ đồ mạch điện
+### 5️⃣ React Web - Thống kê Y tá
+
+Xem hiệu suất xử lý cuộc gọi của từng nhân viên:
+
+![Nurse Stats](assets/bangthongke.png)
+
+**Tính năng:**
+- Card thống kê cho từng y tá: tổng yêu cầu, đã xử lý, tỉ lệ hoàn thành, thời gian TB
+- Nút "Xem chi tiết" để xem lịch sử xử lý
+- Tự động cập nhật mỗi 10 giây
+
+---
+
+### 6️⃣ React Web - Báo cáo
+
+Báo cáo chi tiết với lọc theo thời gian và nhân viên:
+
+![Reports](assets/report.png)
+
+**Tính năng:**
+- Lọc theo khoảng thời gian và nhân viên
+- Thống kê: tổng cuộc gọi, khẩn cấp, thường, đã xử lý, đã từ chối
+- Biểu đồ: theo phòng, phân loại, thời gian phản hồi, hiệu suất nhân viên
+- Xuất báo cáo Excel (.xlsx)
+
+---
+
+### 7️⃣ React Web - Quản lý Tài khoản Y tá
+
+Admin tạo/quản lý tài khoản y tá trên web:
+
+![Nurse Account Management](assets/quanliaccount.png)
+
+**Tính năng:**
+- Tạo tài khoản y tá mới (tên đăng nhập, mật khẩu, họ tên)
+- Danh sách y tá hiện tại với trạng thái hoạt động
+- Xóa tài khoản (soft delete)
+
+---
+
+### 8️⃣ Proteus 8 Circuit Design - Sơ đồ mạch điện
 
 Thiết kế phần cứng cho hệ thống:
 
@@ -344,44 +419,21 @@ JWT_SECRET=generate-strong-random-key-here
 ✅ **Vietnamese UI**: Full Vietnamese localization  
 ✅ **Responsive Design**: Desktop, tablet & mobile  
 ✅ **API Integration**: REST endpoints cho C# GUI  
-✅ **Fallback Mode**: GUI hoạt động nếu backend down  
+✅ **State Workflow**: Pending → Accepted → In Progress → Completed  
+✅ **Anti-Crash**: Cải thiện xử lý async/await toàn hệ thống  
 
-## � Screenshots
+## 📸 Screenshots (Tổng hợp)
 
-### 1. C# WinForms GUI - Giao diện Y tá
-Giao diện cho y tá xác nhận xử lý cuộc gọi từ bệnh nhân:
-- LoginForm bắt buộc trước khi vào Form1
-- Kết nối COM port với Arduino
-- Bảng hàng đợi hiển thị cuộc gọi chờ xử lý
-- Phân biệt cuộc gọi khẩn cấp (hồng) và thường (xanh)
-- Nút "XÁC NHẬN XỰ LÝ" để hoàn thành
-- Nhật ký hệ thống theo dõi tất cả thao tác
-- Hiển thị tên y tá đang đăng nhập và nút Đăng xuất
-
-![C# GUI Dashboard](assets/gui.png)
-
-### 2. React Web Dashboard - Giao diện Quản trị
-Bảng điều khiển web cho quản trị viên giám sát real-time:
-- Thống kê tổng hợp: tổng cuộc gọi, khẩn cấp, đã hoàn thành, tỷ lệ %
-- Cảnh báo khẩn cấp nổi bật (màu đỏ) với thông báo âm thanh
-- Danh sách cuộc gọi chưa xử lý
-- Biểu đồ phân tích theo phòng và loại cuộc gọi
-- Tab quản lý y tá: tạo/xóa user nurse
-- Tab thống kê y tá: xem hiệu suất và lịch sử xử lý
-- Giao diện tối ưu: xám/trắng với đỏ cho cảnh báo
-
-![React Dashboard](assets/web.png)
-
-### 3. Proteus 8 Circuit Design - Sơ đồ mạch điện
-Thiết kế mạch điện cho hệ thống phần cứng:
-- Arduino Uno làm bộ xử lý trung tâm
-- 4 nút bấm cho 4 phòng bệnh (P1, P2, P3, P4)
-- 8 LED chỉ báo trạng thái (4 xanh + 4 đỏ)
-- Buzzer để phát cảnh báo âm thanh
-- Module RS232 để kết nối với máy tính (COM port)
-- Thiết kế xử lý đơn giản, tin cậy
-
-![Proteus Circuit Diagram](assets/proteus.png)
+| # | Ảnh | Mô tả |
+|---|------|-------|
+| 1 | ![Login](assets/nurselogin.png) | **C# Nurse Login** - Đăng nhập y tá bắt buộc |
+| 2 | ![GUI](assets/gui.png) | **C# GUI Dashboard** - Bảng hàng đợi + nhật ký |
+| 3 | ![Detail](assets/guidetail.png) | **Call Detail Popup** - Nút theo trạng thái workflow |
+| 4 | ![Web](assets/web.png) | **Web Dashboard** - Bảng điều khiển admin real-time |
+| 5 | ![Stats](assets/bangthongke.png) | **Thống kê Y tá** - Hiệu suất từng nhân viên |
+| 6 | ![Report](assets/report.png) | **Báo cáo** - Lọc theo thời gian + xuất Excel |
+| 7 | ![Account](assets/quanliaccount.png) | **Quản lý Tài khoản** - Tạo/xóa y tá |
+| 8 | ![Proteus](assets/proteus.png) | **Sơ đồ mạch** - Arduino + LED + Buzzer |
 
 ## �📡 API Endpoints
 
@@ -503,10 +555,10 @@ web-nursecall/
 │   └── NurseCall/
 │       ├── NurseCall.sln         # Visual Studio solution
 │       ├── LoginForm.cs          # Nurse login screen
-│       ├── Form1.cs              # Main Y tá interface
+│       ├── Form1.cs              # Main Y tá interface (async/await)
 │       ├── Form1.Designer.cs     # UI designer file
-│       ├── DatabaseHelper.cs     # SQLite operations
-│       ├── SerialPortManager.cs  # Arduino COM communication
+│       ├── CallDetailForm.cs     # Popup chi tiết với nút theo trạng thái
+│       ├── DatabaseHelper.cs     # SQLite operations (AcceptCall, StartProcessing, CancelCall...)
 │       ├── bin/Debug/
 │       │   └── nurse_call.db     # Shared SQLite database
 │       └── ... (other C# project files)
@@ -648,5 +700,5 @@ Nếu gặp vấn đề:
 
 ---
 
-**Version**: 1.0.0  
-**Last Updated**: April 2026" 
+**Version**: 1.1.0  
+**Last Updated**: May 2026" 
