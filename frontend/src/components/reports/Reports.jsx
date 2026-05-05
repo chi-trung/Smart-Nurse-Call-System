@@ -62,6 +62,22 @@ const formatSeconds = (value) => {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 };
 
+const getStatusKey = (status) => {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'completed') return 'completed';
+  if (normalized === 'cancelled' || normalized === 'rejected') return 'cancelled';
+  if (normalized === 'accepted') return 'accepted';
+  return 'pending';
+};
+
+const getStatusLabel = (status) => {
+  const key = getStatusKey(status);
+  if (key === 'completed') return 'Da xu ly';
+  if (key === 'cancelled') return 'Da tu choi';
+  if (key === 'accepted') return 'Dang xu ly';
+  return 'Chua xu ly';
+};
+
 const safeFilePart = (v) => String(v || '').replace(/[\s:]/g, '-');
 
 const buildDateRange = (filterType, date, month, fromDate, toDate) => {
@@ -135,8 +151,9 @@ const exportPdf = (reportData, rangeInfo, exportScope, selectedNurse) => {
         totalCalls: logsToExport.length,
         emergencyCalls: logsToExport.filter((l) => l.CallType === 'Emergency').length,
         normalCalls: logsToExport.filter((l) => l.CallType !== 'Emergency').length,
-        completedCalls: logsToExport.filter((l) => l.Status === 'Completed').length,
-        pendingCalls: logsToExport.filter((l) => l.Status !== 'Completed').length,
+        completedCalls: logsToExport.filter((l) => getStatusKey(l.Status) === 'completed').length,
+        cancelledCalls: logsToExport.filter((l) => getStatusKey(l.Status) === 'cancelled').length,
+        pendingCalls: logsToExport.filter((l) => ['pending', 'accepted'].includes(getStatusKey(l.Status))).length,
         avgResponseSeconds: reportData.summary.avgResponseSeconds
       }
     : reportData.summary;
@@ -169,6 +186,7 @@ const exportPdf = (reportData, rangeInfo, exportScope, selectedNurse) => {
       ['Cuoc goi khan cap', sum.emergencyCalls],
       ['Cuoc goi thuong', sum.normalCalls],
       ['Da xu ly', sum.completedCalls],
+      ['Da tu choi', sum.cancelledCalls || 0],
       ['Chua xu ly', sum.pendingCalls],
       ['TG phan hoi trung binh', formatSeconds(sum.avgResponseSeconds)],
       ['Ty le hoan thanh', `${completionRate}%`]
@@ -213,7 +231,7 @@ const exportPdf = (reportData, rangeInfo, exportScope, selectedNurse) => {
 
     autoTable(doc, {
       startY,
-      head: [['#', 'Phong', 'Loai', 'Thoi gian goi', 'Thoi gian xu ly', 'Nhan vien', 'Trang thai', 'TG phan hoi']],
+      head: [['#', 'Phong', 'Loai', 'Thoi gian goi', 'Thoi gian xu ly', 'Nhan vien', 'Trang thai', 'Ly do tu choi', 'TG phan hoi']],
       body: logsToExport.map((log, i) => [
         i + 1,
         `Phong ${log.RoomId}`,
@@ -221,7 +239,8 @@ const exportPdf = (reportData, rangeInfo, exportScope, selectedNurse) => {
         formatDisplayDateTime(log.RequestTime),
         formatDisplayDateTime(log.ResponseTime),
         log.NurseName || '-',
-        log.Status === 'Completed' ? 'Da xu ly' : 'Chua xu ly',
+        getStatusLabel(log.Status),
+        log.CancelReason || '-',
         formatSeconds(log.ResponseSeconds)
       ]),
       headStyles: { fillColor: [71, 85, 105], textColor: 255, fontStyle: 'bold' },
@@ -229,9 +248,11 @@ const exportPdf = (reportData, rangeInfo, exportScope, selectedNurse) => {
       alternateRowStyles: { fillColor: [248, 250, 252] },
       didParseCell(data) {
         if (data.section === 'body') {
-          const status = logsToExport[data.row.index]?.Status;
+          const status = getStatusKey(logsToExport[data.row.index]?.Status);
           const type = logsToExport[data.row.index]?.CallType;
-          if (status !== 'Completed') {
+          if (status === 'cancelled') {
+            data.cell.styles.textColor = [185, 28, 28];
+          } else if (status !== 'completed') {
             data.cell.styles.textColor = type === 'Emergency' ? [185, 28, 28] : [146, 64, 14];
           }
         }
@@ -339,8 +360,9 @@ const exportExcel = async (reportData, rangeInfo, exportScope, selectedNurse) =>
         totalCalls:       logsToExport.length,
         emergencyCalls:   logsToExport.filter((l) => l.CallType === 'Emergency').length,
         normalCalls:      logsToExport.filter((l) => l.CallType !== 'Emergency').length,
-        completedCalls:   logsToExport.filter((l) => l.Status === 'Completed').length,
-        pendingCalls:     logsToExport.filter((l) => l.Status !== 'Completed').length,
+        completedCalls:   logsToExport.filter((l) => getStatusKey(l.Status) === 'completed').length,
+        cancelledCalls:   logsToExport.filter((l) => getStatusKey(l.Status) === 'cancelled').length,
+        pendingCalls:     logsToExport.filter((l) => ['pending', 'accepted'].includes(getStatusKey(l.Status))).length,
         avgResponseSeconds: reportData.summary.avgResponseSeconds
       }
     : reportData.summary;
@@ -387,6 +409,7 @@ const exportExcel = async (reportData, rangeInfo, exportScope, selectedNurse) =>
     { label: 'Cuộc gọi khẩn cấp', value: sum.emergencyCalls,                      fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } } },
     { label: 'Cuộc gọi thường',   value: sum.normalCalls,                          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } } },
     { label: 'Đã xử lý',          value: sum.completedCalls,                       fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFBF1' } } },
+    { label: 'Đã từ chối',        value: sum.cancelledCalls || 0,                  fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } } },
     { label: 'Chưa xử lý',        value: sum.pendingCalls,                         fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF9C3' } } },
     { label: 'TG phản hồi TB',    value: formatSeconds(sum.avgResponseSeconds),    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEDE9FE' } } },
     { label: 'Tỷ lệ hoàn thành', value: completionRate,                            fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFECFDF5' } } }
@@ -433,17 +456,20 @@ const exportExcel = async (reportData, rangeInfo, exportScope, selectedNurse) =>
       { key: 'resTime',  width: 22 },
       { key: 'nurse',    width: 22 },
       { key: 'status',   width: 16 },
+      { key: 'reason',   width: 28 },
       { key: 'secNum',   width: 20 },
       { key: 'secFmt',   width: 14 }
     ];
 
     addSheetHeader(ws,
-      ['#', 'Phòng', 'Loại', 'Thời gian gọi', 'Thời gian xử lý', 'Nhân viên', 'Trạng thái', 'TG p/h (giây)', 'TG p/h'],
+      ['#', 'Phòng', 'Loại', 'Thời gian gọi', 'Thời gian xử lý', 'Nhân viên', 'Trạng thái', 'Lý do từ chối', 'TG p/h (giây)', 'TG p/h'],
       STYLE.headerGray
     );
 
     logs.forEach((log, i) => {
-      const isPending   = log.Status !== 'Completed';
+      const statusKey = getStatusKey(log.Status);
+      const isPending = statusKey === 'pending' || statusKey === 'accepted';
+      const isCancelled = statusKey === 'cancelled';
       const isEmergency = log.CallType === 'Emergency';
 
       let fill;
@@ -451,6 +477,9 @@ const exportExcel = async (reportData, rangeInfo, exportScope, selectedNurse) =>
 
       if (isPending && isEmergency) {
         fill = STYLE.rowEmergencyPending; // light red
+        font = STYLE.fontRed;
+      } else if (isCancelled) {
+        fill = STYLE.rowEmergencyPending;
         font = STYLE.fontRed;
       } else if (isPending) {
         fill = STYLE.rowNormalPending;    // light yellow
@@ -468,14 +497,15 @@ const exportExcel = async (reportData, rangeInfo, exportScope, selectedNurse) =>
         formatDisplayDateTime(log.RequestTime),
         formatDisplayDateTime(log.ResponseTime),
         log.NurseName || '-',
-        isPending ? 'Chưa xử lý' : 'Đã xử lý',
+        getStatusLabel(log.Status),
+        log.CancelReason || '-',
         log.ResponseSeconds ?? '-',
         formatSeconds(log.ResponseSeconds)
       ], { fill, font });
 
       row.getCell(1).alignment = STYLE.alignCenter;
-      row.getCell(8).alignment = STYLE.alignCenter;
       row.getCell(9).alignment = STYLE.alignCenter;
+      row.getCell(10).alignment = STYLE.alignCenter;
 
       // Loại cell: tô màu riêng bất kể row bg
       if (isEmergency) {
@@ -487,7 +517,10 @@ const exportExcel = async (reportData, rangeInfo, exportScope, selectedNurse) =>
       }
 
       // Trạng thái cell
-      if (isPending) {
+      if (isCancelled) {
+        row.getCell(7).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+        row.getCell(7).font = { bold: true, color: { argb: 'FFB91C1C' }, size: 10 };
+      } else if (isPending) {
         row.getCell(7).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
         row.getCell(7).font = { bold: true, color: { argb: 'FF92400E' }, size: 10 };
       } else {
@@ -539,7 +572,7 @@ const Reports = () => {
   const [filterCallType, setFilterCallType] = useState('all');
 
   const reportData = report || {
-    summary: { totalCalls: 0, emergencyCalls: 0, normalCalls: 0, completedCalls: 0, pendingCalls: 0, avgResponseSeconds: 0 },
+    summary: { totalCalls: 0, emergencyCalls: 0, normalCalls: 0, completedCalls: 0, cancelledCalls: 0, pendingCalls: 0, avgResponseSeconds: 0 },
     logs: [],
     nurseStats: [],
     charts: { byRoom: [], byType: [] }
@@ -589,8 +622,9 @@ const Reports = () => {
     const totalCalls = filteredLogs.length;
     const emergencyCalls = filteredLogs.filter((l) => l.CallType === 'Emergency').length;
     const normalCalls = filteredLogs.filter((l) => l.CallType !== 'Emergency').length;
-    const completedCalls = filteredLogs.filter((l) => l.Status === 'Completed').length;
-    const pendingCalls = filteredLogs.filter((l) => l.Status !== 'Completed').length;
+    const completedCalls = filteredLogs.filter((l) => getStatusKey(l.Status) === 'completed').length;
+    const cancelledCalls = filteredLogs.filter((l) => getStatusKey(l.Status) === 'cancelled').length;
+    const pendingCalls = filteredLogs.filter((l) => ['pending', 'accepted'].includes(getStatusKey(l.Status))).length;
     const responseValues = filteredLogs
       .map((l) => Number(l.ResponseSeconds))
       .filter((v) => !Number.isNaN(v) && v >= 0);
@@ -598,7 +632,7 @@ const Reports = () => {
       ? Math.round(responseValues.reduce((sum, value) => sum + value, 0) / responseValues.length)
       : 0;
 
-    return { totalCalls, emergencyCalls, normalCalls, completedCalls, pendingCalls, avgResponseSeconds };
+    return { totalCalls, emergencyCalls, normalCalls, completedCalls, cancelledCalls, pendingCalls, avgResponseSeconds };
   }, [filteredLogs]);
 
   /* completion rate */
@@ -817,12 +851,13 @@ const Reports = () => {
       </div>
 
       {/* ── Summary cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-3">
         {[
           { label: 'Tổng cuộc gọi', value: visibleSummary.totalCalls, color: 'blue' },
           { label: 'Khẩn cấp', value: visibleSummary.emergencyCalls, color: 'red' },
           { label: 'Thường', value: visibleSummary.normalCalls, color: 'green' },
           { label: 'Đã xử lý', value: visibleSummary.completedCalls, color: 'teal' },
+          { label: 'Đã từ chối', value: visibleSummary.cancelledCalls, color: 'rose' },
           { label: 'Chưa xử lý', value: visibleSummary.pendingCalls, color: 'yellow' },
           { label: 'TG phản hồi TB', value: formatSeconds(visibleSummary.avgResponseSeconds), color: 'purple' },
           { label: 'Tỷ lệ hoàn thành', value: `${completionRate}%`, color: 'indigo' }
@@ -832,6 +867,7 @@ const Reports = () => {
             red: 'bg-red-50 border-red-200 text-red-700',
             green: 'bg-green-50 border-green-200 text-green-700',
             teal: 'bg-teal-50 border-teal-200 text-teal-700',
+            rose: 'bg-rose-50 border-rose-200 text-rose-700',
             yellow: 'bg-yellow-50 border-yellow-200 text-yellow-700',
             purple: 'bg-purple-50 border-purple-200 text-purple-700',
             indigo: 'bg-indigo-50 border-indigo-200 text-indigo-700'
@@ -946,22 +982,27 @@ const Reports = () => {
                 <th className="text-left px-3 py-3 font-semibold">Thời gian xử lý</th>
                 <th className="text-left px-3 py-3 font-semibold">Nhân viên</th>
                 <th className="text-left px-3 py-3 font-semibold">Trạng thái</th>
+                <th className="text-left px-3 py-3 font-semibold">Lý do từ chối</th>
                 <th className="text-right px-3 py-3 font-semibold">TG phản hồi</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="px-4 py-4 text-gray-400 text-center">Đang tải dữ liệu...</td></tr>
+                <tr><td colSpan={9} className="px-4 py-4 text-gray-400 text-center">Đang tải dữ liệu...</td></tr>
               ) : filteredLogs.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-4 text-gray-400 text-center">Không có dữ liệu trong khoảng này.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-4 text-gray-400 text-center">Không có dữ liệu trong khoảng này.</td></tr>
               ) : filteredLogs.map((log, idx) => {
                 const isEmergency = log.CallType === 'Emergency';
-                const isPending = log.Status !== 'Completed';
+                const statusKey = getStatusKey(log.Status);
+                const isPending = statusKey === 'pending' || statusKey === 'accepted';
+                const isCancelled = statusKey === 'cancelled';
                 return (
                   <tr
                     key={log.Id}
                     className={`border-t transition ${
-                      isEmergency && isPending
+                      isCancelled
+                        ? 'bg-rose-50 hover:bg-rose-100'
+                        : isEmergency && isPending
                         ? 'bg-red-50 hover:bg-red-100'
                         : isPending
                           ? 'bg-yellow-50 hover:bg-yellow-100'
@@ -982,11 +1023,16 @@ const Reports = () => {
                     <td className="px-3 py-2.5 text-gray-700">{log.NurseName || '-'}</td>
                     <td className="px-3 py-2.5">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-                        isPending ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'
+                        isCancelled
+                          ? 'bg-rose-100 text-rose-700'
+                          : isPending
+                            ? 'bg-orange-100 text-orange-700'
+                            : 'bg-blue-100 text-blue-700'
                       }`}>
-                        {isPending ? '⏳ Chưa xử lý' : '✅ Đã xử lý'}
+                        {getStatusLabel(log.Status)}
                       </span>
                     </td>
+                    <td className="px-3 py-2.5 text-gray-700">{log.CancelReason || '-'}</td>
                     <td className="px-3 py-2.5 text-right text-gray-700">{formatSeconds(log.ResponseSeconds)}</td>
                   </tr>
                 );

@@ -46,6 +46,20 @@ const NurseStats = () => {
 
   const selectedNurseInfo = nurses.find((n) => n.Id === selectedNurse);
 
+  const getStatusMeta = (status) => {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (normalized === 'completed') {
+      return { label: 'Da xu ly', className: 'bg-blue-100 text-blue-700' };
+    }
+    if (normalized === 'cancelled' || normalized === 'rejected') {
+      return { label: 'Da tu choi', className: 'bg-rose-100 text-rose-700' };
+    }
+    if (normalized === 'accepted') {
+      return { label: 'Dang xu ly', className: 'bg-amber-100 text-amber-700' };
+    }
+    return { label: 'Cho', className: 'bg-yellow-100 text-yellow-700' };
+  };
+
   return (
     <div className="space-y-6">
 
@@ -165,7 +179,9 @@ const NurseStats = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {nurseLogs.map((log, idx) => (
+                  {nurseLogs.map((log, idx) => {
+                    const statusMeta = getStatusMeta(log.Status);
+                    return (
                     <tr key={log.Id} className={`border-t ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                       <td className="px-3 py-2.5 text-gray-400">{idx + 1}</td>
                       <td className="px-3 py-2.5 font-medium text-gray-800">Phòng {log.RoomId}</td>
@@ -192,16 +208,13 @@ const NurseStats = () => {
                           : '-'}
                       </td>
                       <td className="px-3 py-2.5 text-center">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${
-                          log.Status === 'Completed'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-yellow-100 text-yellow-700'
-                        }`}>
-                          {log.Status === 'Completed' ? '✅ Đã xử lý' : '⏳ Chờ'}
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${statusMeta.className}`}>
+                          {statusMeta.label}
                         </span>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Data.SQLite;
 using System.IO;
 using System.Security.Cryptography;
@@ -36,6 +37,14 @@ public class DatabaseHelper
                 cmd.ExecuteNonQuery();
             }
 
+            // Migration for old databases: add missing columns without dropping existing data.
+            EnsureLogsColumn(conn, "NurseName", "TEXT DEFAULT 'Unknown'");
+            EnsureLogsColumn(conn, "CompletedBy", "TEXT DEFAULT NULL");
+            EnsureLogsColumn(conn, "AcceptedTime", "DATETIME");
+            EnsureLogsColumn(conn, "StartProcessTime", "DATETIME");
+            EnsureLogsColumn(conn, "CancelReason", "TEXT");
+            EnsureLogsColumn(conn, "CancelledTime", "DATETIME");
+
             // Tạo table Users (NEW)
             string usersSql = @"CREATE TABLE IF NOT EXISTS Users (
                         Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,6 +79,33 @@ public class DatabaseHelper
     }
 
     // ============= USER MANAGEMENT =============
+
+    private static void EnsureLogsColumn(SQLiteConnection conn, string columnName, string columnType)
+    {
+        using (SQLiteCommand cmd = new SQLiteCommand("PRAGMA table_info(Logs)", conn))
+        using (SQLiteDataReader reader = cmd.ExecuteReader())
+        {
+            HashSet<string> columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (reader.Read())
+            {
+                if (!reader.IsDBNull(1))
+                {
+                    columns.Add(reader.GetString(1));
+                }
+            }
+
+            if (columns.Contains(columnName))
+            {
+                return;
+            }
+        }
+
+        string alterSql = $"ALTER TABLE Logs ADD COLUMN {columnName} {columnType}";
+        using (SQLiteCommand alterCmd = new SQLiteCommand(alterSql, conn))
+        {
+            alterCmd.ExecuteNonQuery();
+        }
+    }
 
     // Hàm mã hóa password (simple hash)
     private static string HashPassword(string password)
@@ -284,7 +320,7 @@ public class DatabaseHelper
         using (var conn = new SQLiteConnection(connectionString))
         {
             conn.Open();
-            string sql = @"UPDATE Logs SET Status = 'Cancelled', CancelledTime = @cancelTime, 
+            string sql = @"UPDATE Logs SET Status = 'Cancelled', ResponseTime = @cancelTime, CancelledTime = @cancelTime, 
                           CancelReason = @reason
                           WHERE Id = @logId";
             SQLiteCommand cmd = new SQLiteCommand(sql, conn);

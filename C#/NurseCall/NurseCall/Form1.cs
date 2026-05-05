@@ -265,6 +265,7 @@ namespace NurseCall
             {
                 int roomId = int.Parse(row.Cells["Room"].Value.ToString());
                 string typeCode = row.Tag?.ToString() ?? "N";
+                string typeText = row.Cells["Type"].Value?.ToString() ?? "THONG THUONG";
 
                 if (serialPort1.IsOpen)
                 {
@@ -273,6 +274,7 @@ namespace NurseCall
                 }
 
                 DatabaseHelper.CancelCall(callId, cancelReason);
+                CallBackendCancelAPI(callId, roomId, typeCode, typeText, cancelReason, loggedInNurseName);
                 LogMessage("Hủy cuộc gọi", $"Da huy phong {row.Cells["Room"].Value} - Ly do: {cancelReason}");
                 RemoveCallRow(row, callId);
             }
@@ -324,7 +326,6 @@ namespace NurseCall
             {
                 try
                 {
-                    string callType = typeCode == "E" ? "Emergency" : "Normal";
                     DatabaseHelper.CompleteCallById(callId, nurseName);
                 }
                 catch
@@ -332,6 +333,41 @@ namespace NurseCall
                 }
 
                 LogMessage("Lỗi", $"Loi goi API: {ex.Message}");
+            }
+        }
+
+        private async void CallBackendCancelAPI(long callId, int roomId, string typeCode, string typeText, string cancelReason, string nurseName)
+        {
+            try
+            {
+                string callType = typeCode == "E" ? "Emergency" : "Normal";
+
+                var payload = new
+                {
+                    logId = callId,
+                    roomId,
+                    callType,
+                    cancelReason,
+                    nurseName,
+                    nurseId = LoginForm.LoggedInUserId
+                };
+
+                string json = JsonConvert.SerializeObject(payload);
+                var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                var response = await client.PostAsync($"{BACKEND_URL}/calls/cancel-with-reason", content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    LogMessage("Hủy cuộc gọi", $"Da dong bo huy {typeText} phong {roomId} len backend");
+                }
+                else
+                {
+                    LogMessage("Lỗi", $"Khong dong bo huy cuoc goi len Backend (HTTP {response.StatusCode}), da fallback DB local");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage("Lỗi", $"Loi goi API huy cuoc goi: {ex.Message}");
             }
         }
 

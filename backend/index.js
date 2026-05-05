@@ -194,6 +194,36 @@ async function initializeDatabase() {
       else if (!err) console.log('✓ CompletedBy column added to Logs');
     });
 
+    db.run(`ALTER TABLE Logs ADD COLUMN AcceptedTime DATETIME`, (err) => {
+      if (err && !err.message.includes('duplicate')) console.error('Error adding AcceptedTime column:', err);
+      else if (!err) console.log('✓ AcceptedTime column added to Logs');
+    });
+
+    db.run(`ALTER TABLE Logs ADD COLUMN StartProcessTime DATETIME`, (err) => {
+      if (err && !err.message.includes('duplicate')) console.error('Error adding StartProcessTime column:', err);
+      else if (!err) console.log('✓ StartProcessTime column added to Logs');
+    });
+
+    db.run(`ALTER TABLE Logs ADD COLUMN CancelReason TEXT`, (err) => {
+      if (err && !err.message.includes('duplicate')) console.error('Error adding CancelReason column:', err);
+      else if (!err) console.log('✓ CancelReason column added to Logs');
+    });
+
+    db.run(`ALTER TABLE Logs ADD COLUMN CancelledTime DATETIME`, (err) => {
+      if (err && !err.message.includes('duplicate')) console.error('Error adding CancelledTime column:', err);
+      else if (!err) console.log('✓ CancelledTime column added to Logs');
+    });
+
+    // Backfill legacy cancelled rows so ResponseTime is never NULL for cancelled/rejected calls.
+    db.run(`
+      UPDATE Logs
+      SET ResponseTime = COALESCE(CancelledTime, RequestTime)
+      WHERE Status IN ('Cancelled', 'Rejected')
+        AND ResponseTime IS NULL
+    `, (err) => {
+      if (err) console.error('Error backfilling ResponseTime for cancelled logs:', err);
+    });
+
     db.close();
   } catch (error) {
     console.error('Error initializing database:', error);
@@ -266,7 +296,7 @@ app.get('/api/logs', async (req, res) => {
     const db = await openDatabase();
     
     db.all(
-      `SELECT Id, RoomId, CallType, RequestTime, ResponseTime, Status FROM Logs ORDER BY RequestTime DESC`,
+      `SELECT Id, RoomId, CallType, RequestTime, ResponseTime, Status, CancelReason, CancelledTime FROM Logs ORDER BY RequestTime DESC`,
       (err, rows) => {
         db.close();
         
@@ -388,7 +418,8 @@ app.get('/api/reports', async (req, res) => {
         SUM(CASE WHEN CallType = 'Emergency' THEN 1 ELSE 0 END) as emergencyCalls,
         SUM(CASE WHEN CallType != 'Emergency' THEN 1 ELSE 0 END) as normalCalls,
         SUM(CASE WHEN Status = 'Completed' THEN 1 ELSE 0 END) as completedCalls,
-        SUM(CASE WHEN Status != 'Completed' THEN 1 ELSE 0 END) as pendingCalls,
+        SUM(CASE WHEN Status IN ('Cancelled', 'Rejected') THEN 1 ELSE 0 END) as cancelledCalls,
+        SUM(CASE WHEN Status NOT IN ('Completed', 'Cancelled', 'Rejected') THEN 1 ELSE 0 END) as pendingCalls,
         ROUND(AVG(${responseSecondsExpr}), 2) as avgResponseSeconds
       FROM Logs
       ${whereClause}
@@ -402,6 +433,8 @@ app.get('/api/reports', async (req, res) => {
         RequestTime,
         ResponseTime,
         Status,
+        CancelReason,
+        CancelledTime,
         COALESCE(NULLIF(CompletedBy, ''), NULLIF(NurseName, ''), 'Unknown') as NurseName,
         CAST(${responseSecondsExpr} as INTEGER) as ResponseSeconds
       FROM Logs
@@ -460,6 +493,7 @@ app.get('/api/reports', async (req, res) => {
         emergencyCalls: summary?.emergencyCalls || 0,
         normalCalls: summary?.normalCalls || 0,
         completedCalls: summary?.completedCalls || 0,
+        cancelledCalls: summary?.cancelledCalls || 0,
         pendingCalls: summary?.pendingCalls || 0,
         avgResponseSeconds: summary?.avgResponseSeconds || 0
       },
@@ -829,6 +863,92 @@ app.post('/api/calls/complete-with-nurse', async (req, res) => {
     });
   } catch (error) {
     console.error('Error in /api/calls/complete-with-nurse:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST: Cập nhật call cancel với lý do (từ C# WinForms)
+app.post('/api/calls/cancel-with-reason', async (req, res) => {
+  try {
+    const { logId, roomId, callType, cancelReason, nurseName } = req.body;
+
+    if (!logId && (!roomId || !callType)) {
+      return res.status(400).json({ error: 'logId hoặc (roomId + callType) là bắt buộc' });
+    }
+
+    if (!cancelReason || !String(cancelReason).trim()) {
+      return res.status(400).json({ error: 'cancelReason required' });
+    }
+
+    const db = await openDatabaseWrite();
+
+    const updateByIdQuery = `
+      UPDATE Logs
+      SET
+        Status = 'Cancelled',
+        ResponseTime = datetime('now', 'localtime'),
+        CancelReason = ?,
+        CancelledTime = datetime('now', 'localtime'),
+        NurseName = COALESCE(?, NurseName)
+      WHERE Id = ?
+    `;
+
+    const updateByRoomTypeQuery = `
+      UPDATE Logs
+      SET
+        Status = 'Cancelled',
+        ResponseTime = datetime('now', 'localtime'),
+        CancelReason = ?,
+        CancelledTime = datetime('now', 'localtime'),
+        NurseName = COALESCE(?, NurseName)
+      WHERE Id = (
+        SELECT Id FROM Logs
+        WHERE RoomId = ?
+          AND CallType = ?
+          AND Status NOT IN ('Completed', 'Cancelled', 'Rejected')
+        ORDER BY RequestTime DESC
+        LIMIT 1
+      )
+    `;
+
+    const normalizeName = (nurseNameValue) => {
+      const text = String(nurseNameValue || '').trim();
+      return text.length > 0 ? text : null;
+    };
+
+    const nurseLabel = normalizeName(nurseName);
+    const executeQuery = logId ? updateByIdQuery : updateByRoomTypeQuery;
+    const params = logId
+      ? [cancelReason, nurseLabel, logId]
+      : [cancelReason, nurseLabel, roomId, callType];
+
+    db.run(executeQuery, params, function (err) {
+      if (err) {
+        db.close();
+        console.error('Error cancelling call:', err);
+        return res.status(500).json({ error: 'Failed to cancel call' });
+      }
+
+      if (this.changes === 0) {
+        db.close();
+        return res.status(404).json({ error: 'No active call found to cancel' });
+      }
+
+      db.close();
+
+      io.emit('log-update', {
+        message: `${nurseLabel || 'Y tá'} đã từ chối yêu cầu phòng ${roomId || '-'}: ${cancelReason}`,
+        type: 'cancel',
+        nurseName: nurseLabel || 'Unknown'
+      });
+
+      res.json({
+        success: true,
+        message: 'Call cancelled successfully'
+      });
+    });
+  } catch (error) {
+    console.error('Error in /api/calls/cancel-with-reason:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

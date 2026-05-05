@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS Logs (
     Status TEXT DEFAULT 'Pending',
     NurseName TEXT DEFAULT 'Unknown',
     CompletedBy TEXT,
+    AcceptedTime DATETIME,
+    StartProcessTime DATETIME,
+    CancelReason TEXT,
+    CancelledTime DATETIME,
     ResponseDurationSeconds INTEGER  -- Tính toán tự động
 );
 

@@ -5,6 +5,25 @@ export const LogsTable = ({ logs, loading }) => {
   const [sortBy, setSortBy] = useState('RequestTime');
   const [sortOrder, setSortOrder] = useState('desc');
 
+  const getStatusKey = (status) => {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (normalized === 'completed') return 'completed';
+    if (normalized === 'cancelled' || normalized === 'rejected') return 'cancelled';
+    if (normalized === 'accepted') return 'accepted';
+    return 'pending';
+  };
+
+  const parseDateTime = (value) => {
+    if (!value) return null;
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+
+    // SQLite often returns "YYYY-MM-DD HH:mm:ss"; convert to ISO-like format for stable parsing.
+    const text = String(value).trim();
+    const normalized = text.includes('T') ? text : text.replace(' ', 'T');
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
   const handleSort = (column) => {
     if (sortBy === column) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
@@ -20,8 +39,8 @@ export const LogsTable = ({ logs, loading }) => {
       let bVal = b[sortBy];
 
       if (sortBy === 'RequestTime' || sortBy === 'ResponseTime') {
-        aVal = new Date(aVal);
-        bVal = new Date(bVal);
+        aVal = parseDateTime(aVal) || new Date(0);
+        bVal = parseDateTime(bVal) || new Date(0);
       }
 
       if (sortOrder === 'asc') {
@@ -39,8 +58,43 @@ export const LogsTable = ({ logs, loading }) => {
   };
 
   const formatDateTime = (dateString) => {
-    if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleString('vi-VN');
+    const parsed = parseDateTime(dateString);
+    if (!parsed) return '-';
+    return parsed.toLocaleString('vi-VN');
+  };
+
+  const formatResponseColumn = (log) => {
+    const statusKey = getStatusKey(log.Status);
+
+    if (statusKey === 'cancelled') {
+      return 'Đã từ chối';
+    }
+
+    if (statusKey === 'pending' || statusKey === 'accepted') {
+      return 'Đang chờ';
+    }
+
+    return formatDateTime(log.ResponseTime);
+  };
+
+  const getStatusBadge = (log) => {
+    const statusKey = getStatusKey(log.Status);
+    if (statusKey === 'cancelled') {
+      return { className: 'bg-rose-100 text-rose-800', label: 'Đã từ chối' };
+    }
+    if (statusKey === 'accepted') {
+      return { className: 'bg-amber-100 text-amber-800', label: 'Đang xử lý' };
+    }
+    if (statusKey === 'pending') {
+      const isPendingEmergency = log.CallType === 'Emergency';
+      return {
+        className: isPendingEmergency
+          ? 'bg-red-200 text-red-900 animate-blink'
+          : 'bg-gray-100 text-gray-800',
+        label: 'Chưa xử lý'
+      };
+    }
+    return { className: 'bg-gray-200 text-gray-800', label: 'Đã hoàn thành' };
   };
 
   if (loading) {
@@ -113,7 +167,9 @@ export const LogsTable = ({ logs, loading }) => {
           </thead>
           <tbody>
             {sortedLogs.map((log, index) => {
-              const isPendingEmergency = log.Status === 'Pending' && log.CallType === 'Emergency';
+              const statusKey = getStatusKey(log.Status);
+              const isPendingEmergency = statusKey === 'pending' && log.CallType === 'Emergency';
+              const statusBadge = getStatusBadge(log);
               return (
                 <tr
                   key={log.Id}
@@ -140,17 +196,11 @@ export const LogsTable = ({ logs, loading }) => {
                     {formatDateTime(log.RequestTime)}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600">
-                    {formatDateTime(log.ResponseTime)}
+                    {formatResponseColumn(log)}
                   </td>
                   <td className="px-6 py-4 text-sm">
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      log.Status === 'Pending'
-                        ? isPendingEmergency
-                          ? 'bg-red-200 text-red-900 animate-blink'
-                          : 'bg-gray-100 text-gray-800'
-                        : 'bg-gray-200 text-gray-800'
-                    }`}>
-                      {log.Status === 'Pending' ? 'Chưa xử lý' : 'Đã hoàn thành'}
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusBadge.className}`}>
+                      {statusBadge.label}
                     </span>
                   </td>
                 </tr>
