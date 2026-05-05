@@ -67,6 +67,7 @@ const getStatusKey = (status) => {
   if (normalized === 'completed') return 'completed';
   if (normalized === 'cancelled' || normalized === 'rejected') return 'cancelled';
   if (normalized === 'accepted') return 'accepted';
+  if (normalized === 'in progress' || normalized === 'in_progress' || normalized === 'inprogress') return 'in-progress';
   return 'pending';
 };
 
@@ -74,8 +75,9 @@ const getStatusLabel = (status) => {
   const key = getStatusKey(status);
   if (key === 'completed') return 'Da xu ly';
   if (key === 'cancelled') return 'Da tu choi';
-  if (key === 'accepted') return 'Dang xu ly';
-  return 'Chua xu ly';
+  if (key === 'accepted') return 'Da nhan ca';
+  if (key === 'in-progress') return 'Dang xu ly';
+  return 'Cho tiep nhan';
 };
 
 const safeFilePart = (v) => String(v || '').replace(/[\s:]/g, '-');
@@ -153,7 +155,7 @@ const exportPdf = (reportData, rangeInfo, exportScope, selectedNurse) => {
         normalCalls: logsToExport.filter((l) => l.CallType !== 'Emergency').length,
         completedCalls: logsToExport.filter((l) => getStatusKey(l.Status) === 'completed').length,
         cancelledCalls: logsToExport.filter((l) => getStatusKey(l.Status) === 'cancelled').length,
-        pendingCalls: logsToExport.filter((l) => ['pending', 'accepted'].includes(getStatusKey(l.Status))).length,
+        pendingCalls: logsToExport.filter((l) => ['pending', 'accepted', 'in-progress'].includes(getStatusKey(l.Status))).length,
         avgResponseSeconds: reportData.summary.avgResponseSeconds
       }
     : reportData.summary;
@@ -468,7 +470,7 @@ const exportExcel = async (reportData, rangeInfo, exportScope, selectedNurse) =>
 
     logs.forEach((log, i) => {
       const statusKey = getStatusKey(log.Status);
-      const isPending = statusKey === 'pending' || statusKey === 'accepted';
+      const isPending = statusKey === 'pending' || statusKey === 'accepted' || statusKey === 'in-progress';
       const isCancelled = statusKey === 'cancelled';
       const isEmergency = log.CallType === 'Emergency';
 
@@ -624,7 +626,7 @@ const Reports = () => {
     const normalCalls = filteredLogs.filter((l) => l.CallType !== 'Emergency').length;
     const completedCalls = filteredLogs.filter((l) => getStatusKey(l.Status) === 'completed').length;
     const cancelledCalls = filteredLogs.filter((l) => getStatusKey(l.Status) === 'cancelled').length;
-    const pendingCalls = filteredLogs.filter((l) => ['pending', 'accepted'].includes(getStatusKey(l.Status))).length;
+    const pendingCalls = filteredLogs.filter((l) => ['pending', 'accepted', 'in-progress'].includes(getStatusKey(l.Status))).length;
     const responseValues = filteredLogs
       .map((l) => Number(l.ResponseSeconds))
       .filter((v) => !Number.isNaN(v) && v >= 0);
@@ -994,7 +996,7 @@ const Reports = () => {
               ) : filteredLogs.map((log, idx) => {
                 const isEmergency = log.CallType === 'Emergency';
                 const statusKey = getStatusKey(log.Status);
-                const isPending = statusKey === 'pending' || statusKey === 'accepted';
+                const isPending = statusKey === 'pending' || statusKey === 'accepted' || statusKey === 'in-progress';
                 const isCancelled = statusKey === 'cancelled';
                 return (
                   <tr

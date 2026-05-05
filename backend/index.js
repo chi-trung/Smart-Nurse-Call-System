@@ -151,6 +151,25 @@ function appendCondition(whereClause, condition) {
   return `${whereClause} AND ${condition}`;
 }
 
+function normalizeCallStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'pending') return 'Pending';
+  if (normalized === 'accepted') return 'Accepted';
+  if (normalized === 'in progress' || normalized === 'in_progress' || normalized === 'inprogress') return 'In Progress';
+  if (normalized === 'completed') return 'Completed';
+  if (normalized === 'cancelled' || normalized === 'canceled' || normalized === 'rejected') return 'Cancelled';
+  return '';
+}
+
+function cleanText(value) {
+  const text = String(value || '').trim();
+  return text.length > 0 ? text : null;
+}
+
+function getActorName(reqBody, req) {
+  return cleanText(reqBody?.nurseName) || cleanText(req.user?.username) || 'Unknown';
+}
+
 // Initialize database - tạo tables nếu chưa có
 async function initializeDatabase() {
   try {
@@ -296,7 +315,7 @@ app.get('/api/logs', async (req, res) => {
     const db = await openDatabase();
     
     db.all(
-      `SELECT Id, RoomId, CallType, RequestTime, ResponseTime, Status, CancelReason, CancelledTime FROM Logs ORDER BY RequestTime DESC`,
+      `SELECT Id, RoomId, CallType, RequestTime, ResponseTime, Status, NurseName, CompletedBy, AcceptedTime, StartProcessTime, CancelReason, CancelledTime FROM Logs ORDER BY RequestTime DESC`,
       (err, rows) => {
         db.close();
         
@@ -331,6 +350,8 @@ app.get('/api/logs/stats', async (req, res) => {
       SELECT 
         COUNT(*) as totalLogs,
         SUM(CASE WHEN CallType = 'Emergency' AND Status = 'Pending' THEN 1 ELSE 0 END) as pendingEmergency,
+        SUM(CASE WHEN Status = 'Accepted' THEN 1 ELSE 0 END) as acceptedLogs,
+        SUM(CASE WHEN Status = 'In Progress' THEN 1 ELSE 0 END) as inProgressLogs,
         SUM(CASE WHEN Status = 'Completed' THEN 1 ELSE 0 END) as completedLogs,
         SUM(CASE WHEN CallType = 'Emergency' THEN 1 ELSE 0 END) as totalEmergency
       FROM Logs
@@ -347,6 +368,8 @@ app.get('/api/logs/stats', async (req, res) => {
       const stats = {
         totalLogs: row.totalLogs || 0,
         pendingEmergency: row.pendingEmergency || 0,
+        acceptedLogs: row.acceptedLogs || 0,
+        inProgressLogs: row.inProgressLogs || 0,
         completedLogs: row.completedLogs || 0,
         totalEmergency: row.totalEmergency || 0,
         completionRate: row.totalLogs ? ((row.completedLogs / row.totalLogs) * 100).toFixed(2) : 0
@@ -433,6 +456,8 @@ app.get('/api/reports', async (req, res) => {
         RequestTime,
         ResponseTime,
         Status,
+        AcceptedTime,
+        StartProcessTime,
         CancelReason,
         CancelledTime,
         COALESCE(NULLIF(CompletedBy, ''), NULLIF(NurseName, ''), 'Unknown') as NurseName,
@@ -509,6 +534,215 @@ app.get('/api/reports', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch report data' });
   } finally {
     if (db) db.close();
+  }
+});
+
+// PATCH: update call workflow status from web/C# clients
+app.patch('/api/calls/:id/status', async (req, res) => {
+  let db;
+
+  try {
+    const logId = parseInt(req.params.id, 10);
+    const targetStatus = normalizeCallStatus(req.body?.status);
+    const cancelReason = cleanText(req.body?.cancelReason);
+    const actorName = getActorName(req.body, req);
+    const roomId = parseInt(req.body?.roomId, 10);
+    const callType = cleanText(req.body?.callType);
+
+    if (!logId || !targetStatus) {
+      return res.status(400).json({ error: 'logId and status are required' });
+    }
+
+    if (targetStatus === 'Cancelled' && !cancelReason) {
+      return res.status(400).json({ error: 'cancelReason required' });
+    }
+
+    db = await openDatabaseWrite();
+
+    const loadById = (done) => {
+      db.get(
+        `SELECT Id, RoomId, CallType, Status, AcceptedTime, StartProcessTime, RequestTime FROM Logs WHERE Id = ?`,
+        [logId],
+        done
+      );
+    };
+
+    const loadByRoomType = (done) => {
+      if (!roomId || !callType) {
+        return done(null, null);
+      }
+
+      db.get(
+        `SELECT Id, RoomId, CallType, Status, AcceptedTime, StartProcessTime, RequestTime
+         FROM Logs
+         WHERE RoomId = ?
+           AND CallType = ?
+           AND Status NOT IN ('Completed', 'Cancelled', 'Rejected')
+         ORDER BY RequestTime DESC
+         LIMIT 1`,
+        [roomId, callType],
+        done
+      );
+    };
+
+    loadById((idErr, rowById) => {
+      if (idErr) {
+        db.close();
+        console.error('Error loading call for status update:', idErr);
+        return res.status(500).json({ error: 'Failed to load call' });
+      }
+
+      loadByRoomType((contextErr, rowByContext) => {
+        if (contextErr) {
+          db.close();
+          console.error('Error loading call by room/type:', contextErr);
+          return res.status(500).json({ error: 'Failed to load call context' });
+        }
+
+        let row = rowById;
+        const idStatus = normalizeCallStatus(rowById?.Status);
+        if (!row || idStatus === 'Completed' || idStatus === 'Cancelled') {
+          if (rowByContext) {
+            row = rowByContext;
+          }
+        }
+
+        if (!row) {
+          db.close();
+          return res.status(404).json({ error: 'Call not found' });
+        }
+
+        const resolvedLogId = row.Id;
+        const currentStatus = normalizeCallStatus(row.Status) || 'Pending';
+        const statusRank = {
+          Pending: 1,
+          Accepted: 2,
+          'In Progress': 3,
+          Completed: 4,
+          Cancelled: 4
+        };
+
+        if (currentStatus === targetStatus) {
+          db.close();
+          return res.json({
+            success: true,
+            message: `Call #${resolvedLogId} already ${targetStatus}`,
+            logId: resolvedLogId,
+            status: targetStatus,
+            noOp: true
+          });
+        }
+
+        if (targetStatus !== 'Cancelled' && (statusRank[currentStatus] || 0) > (statusRank[targetStatus] || 0)) {
+          db.close();
+          return res.json({
+            success: true,
+            message: `Call #${resolvedLogId} already beyond ${targetStatus}`,
+            logId: resolvedLogId,
+            status: currentStatus,
+            noOp: true
+          });
+        }
+
+        const transitions = {
+          Accepted: ['Pending'],
+          'In Progress': ['Pending', 'Accepted'],
+          Completed: ['Pending', 'Accepted', 'In Progress'],
+          Cancelled: ['Pending', 'Accepted', 'In Progress']
+        };
+
+        const allowedFrom = transitions[targetStatus] || [];
+        if (!allowedFrom.includes(currentStatus)) {
+          db.close();
+          return res.status(409).json({ error: `Cannot change status from ${currentStatus || 'Unknown'} to ${targetStatus}` });
+        }
+
+        let updateQuery = '';
+        let params = [];
+
+        if (targetStatus === 'Accepted') {
+          updateQuery = `
+            UPDATE Logs
+            SET
+              Status = 'Accepted',
+              AcceptedTime = COALESCE(AcceptedTime, datetime('now', 'localtime')),
+              NurseName = COALESCE(NULLIF(?, ''), NurseName)
+            WHERE Id = ?
+          `;
+          params = [actorName, resolvedLogId];
+        } else if (targetStatus === 'In Progress') {
+          updateQuery = `
+            UPDATE Logs
+            SET
+              Status = 'In Progress',
+              AcceptedTime = COALESCE(AcceptedTime, datetime('now', 'localtime')),
+              StartProcessTime = COALESCE(StartProcessTime, datetime('now', 'localtime')),
+              NurseName = COALESCE(NULLIF(?, ''), NurseName)
+            WHERE Id = ?
+          `;
+          params = [actorName, resolvedLogId];
+        } else if (targetStatus === 'Completed') {
+          updateQuery = `
+            UPDATE Logs
+            SET
+              Status = 'Completed',
+              AcceptedTime = COALESCE(AcceptedTime, datetime('now', 'localtime')),
+              StartProcessTime = COALESCE(StartProcessTime, AcceptedTime, datetime('now', 'localtime')),
+              ResponseTime = datetime('now', 'localtime'),
+              NurseName = COALESCE(NULLIF(?, ''), NurseName),
+              CompletedBy = COALESCE(NULLIF(?, ''), CompletedBy)
+            WHERE Id = ?
+          `;
+          params = [actorName, actorName, resolvedLogId];
+        } else {
+          updateQuery = `
+            UPDATE Logs
+            SET
+              Status = 'Cancelled',
+              ResponseTime = datetime('now', 'localtime'),
+              CancelReason = ?,
+              CancelledTime = datetime('now', 'localtime'),
+              NurseName = COALESCE(NULLIF(?, ''), NurseName)
+            WHERE Id = ?
+          `;
+          params = [cancelReason, actorName, resolvedLogId];
+        }
+
+        db.run(updateQuery, params, function(updateErr) {
+          db.close();
+
+          if (updateErr) {
+            console.error('Error updating call status:', updateErr);
+            return res.status(500).json({ error: 'Failed to update call status' });
+          }
+
+          io.emit('call-status-updated', {
+            logId: resolvedLogId,
+            status: targetStatus,
+            nurseName: actorName,
+            cancelReason: targetStatus === 'Cancelled' ? cancelReason : null,
+            timestamp: new Date().toISOString()
+          });
+
+          io.emit('log-update', {
+            message: `Call #${resolvedLogId} đã chuyển sang trạng thái ${targetStatus}`,
+            type: targetStatus === 'Cancelled' ? 'cancel' : 'status-update',
+            nurseName: actorName
+          });
+
+          return res.json({
+            success: true,
+            message: `Call #${resolvedLogId} updated to ${targetStatus}`,
+            logId: resolvedLogId,
+            status: targetStatus
+          });
+        });
+      });
+    });
+  } catch (error) {
+    if (db) db.close();
+    console.error('Error in /api/calls/:id/status:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

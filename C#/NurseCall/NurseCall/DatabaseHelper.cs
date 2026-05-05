@@ -332,6 +332,24 @@ public class DatabaseHelper
         }
     }
 
+    // Hàm bắt đầu xử lý (In Progress)
+    public static void StartProcessing(long logId, string nurseName = "Unknown")
+    {
+        using (var conn = new SQLiteConnection(connectionString))
+        {
+            conn.Open();
+            string sql = @"UPDATE Logs SET Status = 'In Progress', StartProcessTime = @startTime, AcceptedTime = COALESCE(AcceptedTime, @startTime), NurseName = @nurseName WHERE Id = @logId";
+            using (SQLiteCommand cmd = new SQLiteCommand(sql, conn))
+            {
+                cmd.Parameters.AddWithValue("@startTime", DateTime.Now);
+                cmd.Parameters.AddWithValue("@logId", logId);
+                cmd.Parameters.AddWithValue("@nurseName", nurseName ?? "Unknown");
+                cmd.ExecuteNonQuery();
+            }
+            conn.Close();
+        }
+    }
+
     // Hàm lấy chi tiết call từ ID
     public static (long id, int roomId, string callType, DateTime requestTime, string status, 
                    string nurseName, DateTime? acceptedTime) GetCallDetails(long logId)

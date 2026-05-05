@@ -94,6 +94,8 @@ export const logsService = {
     }
   },
 
+  // Call status updates are performed by nurses via the C# GUI. Web is read-only.
+
   // Health check
   healthCheck: async () => {
     try {

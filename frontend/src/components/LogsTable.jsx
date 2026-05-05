@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { ChevronUp, ChevronDown } from 'lucide-react';
+import { authService, logsService } from '../services/api';
 
-export const LogsTable = ({ logs, loading }) => {
+export const LogsTable = ({ logs, loading, onRefresh }) => {
   const [sortBy, setSortBy] = useState('RequestTime');
   const [sortOrder, setSortOrder] = useState('desc');
 
@@ -10,6 +11,7 @@ export const LogsTable = ({ logs, loading }) => {
     if (normalized === 'completed') return 'completed';
     if (normalized === 'cancelled' || normalized === 'rejected') return 'cancelled';
     if (normalized === 'accepted') return 'accepted';
+    if (normalized === 'in progress' || normalized === 'in_progress' || normalized === 'inprogress') return 'in-progress';
     return 'pending';
   };
 
@@ -63,15 +65,31 @@ export const LogsTable = ({ logs, loading }) => {
     return parsed.toLocaleString('vi-VN');
   };
 
+  const getActorName = () => {
+    const user = authService.getUser();
+    return user?.fullName || user?.username || 'Unknown';
+  };
+
+
+  // Web view is read-only for managers; nurses perform actions in the C# GUI.
+
   const formatResponseColumn = (log) => {
     const statusKey = getStatusKey(log.Status);
 
     if (statusKey === 'cancelled') {
-      return 'Đã từ chối';
+      return log.CancelledTime ? `Đã từ chối lúc ${formatDateTime(log.CancelledTime)}` : 'Đã từ chối';
     }
 
-    if (statusKey === 'pending' || statusKey === 'accepted') {
-      return 'Đang chờ';
+    if (statusKey === 'pending') {
+      return 'Chờ tiếp nhận';
+    }
+
+    if (statusKey === 'accepted') {
+      return log.AcceptedTime ? `Đã nhận ca lúc ${formatDateTime(log.AcceptedTime)}` : 'Đã nhận ca';
+    }
+
+    if (statusKey === 'in-progress') {
+      return log.StartProcessTime ? `Đang xử lý từ ${formatDateTime(log.StartProcessTime)}` : 'Đang xử lý';
     }
 
     return formatDateTime(log.ResponseTime);
@@ -82,8 +100,11 @@ export const LogsTable = ({ logs, loading }) => {
     if (statusKey === 'cancelled') {
       return { className: 'bg-rose-100 text-rose-800', label: 'Đã từ chối' };
     }
+    if (statusKey === 'in-progress') {
+      return { className: 'bg-blue-100 text-blue-800', label: 'Đang xử lý' };
+    }
     if (statusKey === 'accepted') {
-      return { className: 'bg-amber-100 text-amber-800', label: 'Đang xử lý' };
+      return { className: 'bg-amber-100 text-amber-800', label: 'Đã nhận ca' };
     }
     if (statusKey === 'pending') {
       const isPendingEmergency = log.CallType === 'Emergency';
@@ -91,10 +112,10 @@ export const LogsTable = ({ logs, loading }) => {
         className: isPendingEmergency
           ? 'bg-red-200 text-red-900 animate-blink'
           : 'bg-gray-100 text-gray-800',
-        label: 'Chưa xử lý'
+        label: 'Chờ tiếp nhận'
       };
     }
-    return { className: 'bg-gray-200 text-gray-800', label: 'Đã hoàn thành' };
+    return { className: 'bg-emerald-100 text-emerald-800', label: 'Đã hoàn tất' };
   };
 
   if (loading) {
@@ -163,6 +184,7 @@ export const LogsTable = ({ logs, loading }) => {
                   Trạng thái <SortIcon column="Status" />
                 </button>
               </th>
+              {/* Hành động removed: managers view is read-only */}
             </tr>
           </thead>
           <tbody>
@@ -170,6 +192,9 @@ export const LogsTable = ({ logs, loading }) => {
               const statusKey = getStatusKey(log.Status);
               const isPendingEmergency = statusKey === 'pending' && log.CallType === 'Emergency';
               const statusBadge = getStatusBadge(log);
+              // Web is read-only: no actions available here
+              const actions = [];
+              const isLoading = false;
               return (
                 <tr
                   key={log.Id}
@@ -203,6 +228,7 @@ export const LogsTable = ({ logs, loading }) => {
                       {statusBadge.label}
                     </span>
                   </td>
+                  {/* Action column removed; web is display-only */}
                 </tr>
               );
             })}

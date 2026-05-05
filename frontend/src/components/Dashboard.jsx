@@ -128,6 +128,11 @@ export const Dashboard = ({ onLogout }) => {
       setTimeout(() => fetchData(), 500);
     });
 
+    socket.on('call-status-updated', (data) => {
+      console.log('Call status updated:', data);
+      setTimeout(() => fetchData(), 250);
+    });
+
     socket.on('new-alert', (alert) => {
       console.log('New alert received:', alert);
       setAlerts((prev) => [...prev, alert]);
@@ -330,7 +335,7 @@ export const Dashboard = ({ onLogout }) => {
                   Làm mới
                 </button>
               </div>
-              <LogsTable logs={logs} loading={loading} />
+              <LogsTable logs={logs} loading={loading} onRefresh={fetchData} />
             </section>
           </>
         )}

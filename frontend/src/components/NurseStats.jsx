@@ -55,9 +55,12 @@ const NurseStats = () => {
       return { label: 'Da tu choi', className: 'bg-rose-100 text-rose-700' };
     }
     if (normalized === 'accepted') {
-      return { label: 'Dang xu ly', className: 'bg-amber-100 text-amber-700' };
+      return { label: 'Da nhan ca', className: 'bg-amber-100 text-amber-700' };
     }
-    return { label: 'Cho', className: 'bg-yellow-100 text-yellow-700' };
+    if (normalized === 'in progress' || normalized === 'in_progress' || normalized === 'inprogress') {
+      return { label: 'Dang xu ly', className: 'bg-blue-100 text-blue-700' };
+    }
+    return { label: 'Cho tiep nhan', className: 'bg-yellow-100 text-yellow-700' };
   };
 
   return (

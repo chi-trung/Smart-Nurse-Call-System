@@ -208,7 +208,7 @@ namespace NurseCall
             dgvQueue.Sort(dgvQueue.Columns["Priority"], ListSortDirection.Ascending);
         }
 
-        private void DgvQueue_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        private async void DgvQueue_CellContentClick(object sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex != dgvQueue.Columns["Action"].Index)
             {
@@ -226,27 +226,102 @@ namespace NurseCall
                 requestTime = callInfo.requestTime;
             }
 
-            ShowCallDetailPopup(callId, roomId, typeCode, requestTime, row);
+            await ShowCallDetailPopup(callId, roomId, typeCode, requestTime, row);
         }
 
-        private void ShowCallDetailPopup(long callId, int roomId, string typeCode, DateTime requestTime, DataGridViewRow row)
+        private async System.Threading.Tasks.Task ShowCallDetailPopup(long callId, int roomId, string typeCode, DateTime requestTime, DataGridViewRow row)
         {
-            using (CallDetailForm popupForm = new CallDetailForm(callId, roomId, typeCode, requestTime))
+            var detail = DatabaseHelper.GetCallDetails(callId);
+            string currentStatus = string.IsNullOrWhiteSpace(detail.status) ? "Pending" : detail.status;
+
+            using (CallDetailForm popupForm = new CallDetailForm(callId, roomId, typeCode, requestTime, currentStatus))
             {
                 DialogResult result = popupForm.ShowDialog(this);
 
-                if (result == DialogResult.OK && popupForm.IsConfirmed)
+                if (result == DialogResult.OK)
                 {
-                    ConfirmCallCompletion(callId, roomId, typeCode, row);
-                }
-                else if (result == DialogResult.Cancel && popupForm.IsCancelled)
-                {
-                    CancelCallWithReason(callId, popupForm.CancelReason, row);
+                    string action = popupForm.ActionRequested;
+                    if (action == "Complete")
+                    {
+                        await ConfirmCallCompletion(callId, roomId, typeCode, row);
+                    }
+                    else if (action == "Cancel")
+                    {
+                        await CancelCallWithReason(callId, popupForm.CancelReason, row);
+                    }
+                    else if (action == "Accept")
+                    {
+                        await AcceptCall(callId, roomId, typeCode);
+                    }
+                    else if (action == "Start")
+                    {
+                        await StartProcessingCall(callId, roomId, typeCode);
+                    }
                 }
             }
         }
 
-        private void ConfirmCallCompletion(long callId, int roomId, string typeCode, DataGridViewRow row)
+        private string NormalizeStatus(string status)
+        {
+            string normalized = (status ?? string.Empty).Trim().ToLowerInvariant();
+            if (normalized == "accepted") return "accepted";
+            if (normalized == "in progress" || normalized == "in_progress" || normalized == "inprogress") return "in-progress";
+            if (normalized == "completed") return "completed";
+            if (normalized == "cancelled" || normalized == "rejected") return "cancelled";
+            return "pending";
+        }
+
+        private async System.Threading.Tasks.Task AcceptCall(long callId, int roomId, string typeCode)
+        {
+            try
+            {
+                string currentStatus = NormalizeStatus(DatabaseHelper.GetCallDetails(callId).status);
+                if (currentStatus != "pending")
+                {
+                    LogMessage("Nhận ca", $"Call #{callId} không ở trạng thái chờ nhận (hiện tại: {currentStatus})");
+                    return;
+                }
+
+                DatabaseHelper.AcceptCall(callId);
+                LogMessage("Nhận ca", $"Đã nhận ca (Call #{callId})");
+                await CallBackendUpdateStatusAPI(callId, "Accepted", roomId, typeCode, null);
+            }
+            catch (Exception ex)
+            {
+                LogMessage("Lỗi", $"Lỗi AcceptCall: {ex.Message}");
+            }
+        }
+
+        private async System.Threading.Tasks.Task StartProcessingCall(long callId, int roomId, string typeCode)
+        {
+            try
+            {
+                string currentStatus = NormalizeStatus(DatabaseHelper.GetCallDetails(callId).status);
+
+                if (currentStatus == "pending")
+                {
+                    DatabaseHelper.AcceptCall(callId);
+                    await CallBackendUpdateStatusAPI(callId, "Accepted", roomId, typeCode, null);
+                    currentStatus = "accepted";
+                }
+
+                if (currentStatus != "accepted")
+                {
+                    LogMessage("Bắt đầu", $"Call #{callId} chưa thể bắt đầu xử lý (hiện tại: {currentStatus})");
+                    return;
+                }
+
+                DatabaseHelper.StartProcessing(callId, loggedInNurseName);
+                LogMessage("Bắt đầu", $"Bắt đầu xử lý (Call #{callId})");
+                await CallBackendUpdateStatusAPI(callId, "In Progress", roomId, typeCode, null);
+            }
+            catch (Exception ex)
+            {
+                LogMessage("Lỗi", $"Lỗi StartProcessingCall: {ex.Message}");
+            }
+        }
+
+        private async System.Threading.Tasks.Task ConfirmCallCompletion(long callId, int roomId, string typeCode, DataGridViewRow row)
         {
             if (!serialPort1.IsOpen)
             {
@@ -254,18 +329,54 @@ namespace NurseCall
                 return;
             }
 
-            serialPort1.WriteLine($"DONE:{roomId}:{typeCode}");
-            CallBackendCompleteAPI(roomId, typeCode, row.Cells["Type"].Value.ToString(), callId, loggedInNurseName);
-            RemoveCallRow(row, callId);
+            try
+            {
+                string currentStatus = NormalizeStatus(DatabaseHelper.GetCallDetails(callId).status);
+
+                // Quick-complete path: auto transition to keep workflow valid and avoid crashes.
+                if (currentStatus == "pending")
+                {
+                    DatabaseHelper.AcceptCall(callId);
+                    await CallBackendUpdateStatusAPI(callId, "Accepted", roomId, typeCode, null);
+
+                    DatabaseHelper.StartProcessing(callId, loggedInNurseName);
+                    await CallBackendUpdateStatusAPI(callId, "In Progress", roomId, typeCode, null);
+                }
+                else if (currentStatus == "accepted")
+                {
+                    DatabaseHelper.StartProcessing(callId, loggedInNurseName);
+                    await CallBackendUpdateStatusAPI(callId, "In Progress", roomId, typeCode, null);
+                }
+                else if (currentStatus == "completed" || currentStatus == "cancelled")
+                {
+                    LogMessage("Xử lý", $"Call #{callId} đã kết thúc (trạng thái: {currentStatus})");
+                    return;
+                }
+
+                serialPort1.WriteLine($"DONE:{roomId}:{typeCode}");
+                DatabaseHelper.CompleteCallById(callId, loggedInNurseName);
+
+                bool completedSynced = await CallBackendUpdateStatusAPI(callId, "Completed", roomId, typeCode, null);
+                if (!completedSynced)
+                {
+                    await CallBackendCompleteFallbackAPI(roomId, typeCode, loggedInNurseName);
+                }
+
+                LogMessage("Xử lý", $"Đã xử lý xong {row.Cells["Type"].Value} phòng {roomId} - {loggedInNurseName}");
+                RemoveCallRow(row, callId);
+            }
+            catch (Exception ex)
+            {
+                LogMessage("Lỗi", $"Lỗi khi hoàn tất cuộc gọi: {ex.Message}");
+            }
         }
 
-        private void CancelCallWithReason(long callId, string cancelReason, DataGridViewRow row)
+        private async System.Threading.Tasks.Task CancelCallWithReason(long callId, string cancelReason, DataGridViewRow row)
         {
             try
             {
                 int roomId = int.Parse(row.Cells["Room"].Value.ToString());
                 string typeCode = row.Tag?.ToString() ?? "N";
-                string typeText = row.Cells["Type"].Value?.ToString() ?? "THONG THUONG";
 
                 if (serialPort1.IsOpen)
                 {
@@ -274,7 +385,13 @@ namespace NurseCall
                 }
 
                 DatabaseHelper.CancelCall(callId, cancelReason);
-                CallBackendCancelAPI(callId, roomId, typeCode, typeText, cancelReason, loggedInNurseName);
+
+                bool cancelledSynced = await CallBackendUpdateStatusAPI(callId, "Cancelled", roomId, typeCode, cancelReason);
+                if (!cancelledSynced)
+                {
+                    await CallBackendCancelFallbackAPI(callId, roomId, typeCode, cancelReason, loggedInNurseName);
+                }
+
                 LogMessage("Hủy cuộc gọi", $"Da huy phong {row.Cells["Room"].Value} - Ly do: {cancelReason}");
                 RemoveCallRow(row, callId);
             }
@@ -293,12 +410,56 @@ namespace NurseCall
             }
         }
 
-        private async void CallBackendCompleteAPI(int roomId, string typeCode, string typeText, long callId, string nurseName)
+        private async System.Threading.Tasks.Task<bool> CallBackendUpdateStatusAPI(long callId, string status, int roomId, string typeCode, string cancelReason = null)
         {
             try
             {
                 string callType = typeCode == "E" ? "Emergency" : "Normal";
+                var payload = new
+                {
+                    status,
+                    nurseName = loggedInNurseName,
+                    nurseId = LoginForm.LoggedInUserId,
+                    cancelReason = cancelReason,
+                    roomId,
+                    callType
+                };
 
+                string json = JsonConvert.SerializeObject(payload);
+                var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                var request = new HttpRequestMessage(new HttpMethod("PATCH"), $"{BACKEND_URL}/calls/{callId}/status") { Content = content };
+                var response = await client.SendAsync(request);
+                if (response.IsSuccessStatusCode)
+                {
+                    LogMessage("Sync", $"Đã đồng bộ trạng thái '{status}' cho Call #{callId} lên backend");
+                    return true;
+                }
+                else
+                {
+                    if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+                    {
+                        // Conflict thường xảy ra khi backend dùng ID khác local hoặc trạng thái đã đổi trước đó.
+                        LogMessage("Sync", $"Backend trả về Conflict cho Call #{callId} khi cập nhật '{status}', sẽ thử đồng bộ theo fallback.");
+                    }
+                    else
+                    {
+                        LogMessage("Lỗi", $"Không đồng bộ trạng thái lên backend (HTTP {response.StatusCode})");
+                    }
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage("Lỗi", $"Lỗi gọi API cập nhật trạng thái: {ex.Message}");
+                return false;
+            }
+        }
+
+        private async System.Threading.Tasks.Task CallBackendCompleteFallbackAPI(int roomId, string typeCode, string nurseName)
+        {
+            try
+            {
+                string callType = typeCode == "E" ? "Emergency" : "Normal";
                 var payload = new
                 {
                     roomId,
@@ -313,35 +474,24 @@ namespace NurseCall
 
                 if (response.IsSuccessStatusCode)
                 {
-                    DatabaseHelper.CompleteCallById(callId, nurseName);
-                    LogMessage("Xử lý", $"Da xu ly xong {typeText} phong {roomId} - {nurseName}");
+                    LogMessage("Sync", $"Đã fallback đồng bộ Complete cho phòng {roomId}.");
                 }
                 else
                 {
-                    DatabaseHelper.CompleteCallById(callId, nurseName);
-                    LogMessage("Lỗi", $"Khong cap nhat duoc Backend (HTTP {response.StatusCode}), da fallback DB local");
+                    LogMessage("Lỗi", $"Fallback Complete thất bại (HTTP {response.StatusCode}).");
                 }
             }
             catch (Exception ex)
             {
-                try
-                {
-                    DatabaseHelper.CompleteCallById(callId, nurseName);
-                }
-                catch
-                {
-                }
-
-                LogMessage("Lỗi", $"Loi goi API: {ex.Message}");
+                LogMessage("Lỗi", $"Lỗi fallback Complete: {ex.Message}");
             }
         }
 
-        private async void CallBackendCancelAPI(long callId, int roomId, string typeCode, string typeText, string cancelReason, string nurseName)
+        private async System.Threading.Tasks.Task CallBackendCancelFallbackAPI(long callId, int roomId, string typeCode, string cancelReason, string nurseName)
         {
             try
             {
                 string callType = typeCode == "E" ? "Emergency" : "Normal";
-
                 var payload = new
                 {
                     logId = callId,
@@ -358,16 +508,16 @@ namespace NurseCall
 
                 if (response.IsSuccessStatusCode)
                 {
-                    LogMessage("Hủy cuộc gọi", $"Da dong bo huy {typeText} phong {roomId} len backend");
+                    LogMessage("Sync", $"Đã fallback đồng bộ Cancel cho phòng {roomId}.");
                 }
                 else
                 {
-                    LogMessage("Lỗi", $"Khong dong bo huy cuoc goi len Backend (HTTP {response.StatusCode}), da fallback DB local");
+                    LogMessage("Lỗi", $"Fallback Cancel thất bại (HTTP {response.StatusCode}).");
                 }
             }
             catch (Exception ex)
             {
-                LogMessage("Lỗi", $"Loi goi API huy cuoc goi: {ex.Message}");
+                LogMessage("Lỗi", $"Lỗi fallback Cancel: {ex.Message}");
             }
         }
 
